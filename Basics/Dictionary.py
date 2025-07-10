@@ -4,6 +4,11 @@ Values can be any data type (strings, numbers,
                              lists, other dictionaries, etc.).
 Dictionaries are unordered (as of Python 3.6+, they maintain insertion order).
 
+my_dict.keys()     # dict_keys(['name', 'age', 'email'])
+my_dict.values()   # dict_values(['Alice', 31, 'alice@example.com'])
+my_dict.items()    # dict_items([('name', 'Alice'), ('age', 31), ...])
+                            
+
 person = {
     "name": "Bob",
     "age": 25,
