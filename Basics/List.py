@@ -1,3 +1,9 @@
+list is an ordered collection of items.
+Items can be of any data type: numbers, strings, other lists, objects, etc.
+Lists are mutable — you can change, add, or remove items.
+
+
+
 fruits = ["apple", "banana", "cherry"]
 
 print("Original list:", fruits)
