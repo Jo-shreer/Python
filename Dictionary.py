@@ -1,3 +1,9 @@
+
+Keys must be unique and immutable (e.g., strings, numbers, tuples).
+Values can be any data type (strings, numbers, 
+                             lists, other dictionaries, etc.).
+Dictionaries are unordered (as of Python 3.6+, they maintain insertion order).
+
 person = {
     "name": "Bob",
     "age": 25,
