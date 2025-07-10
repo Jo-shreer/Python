@@ -1,3 +1,9 @@
+Sends a GET request to fetch a random joke.
+Checks if the request was successful (status_code == 200).
+Parses the JSON response.
+Prints the joke setup and punchline.
+
+
 
 import requests
 
