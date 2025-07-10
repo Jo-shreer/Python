@@ -13,6 +13,9 @@ import json
 with open("data.json") as f:
     data = json.load(f)
     print(data)
+    print("Name:", data["name"])
+    print("First Skill:", data["skills"][0])
+
 
 
 op
@@ -22,3 +25,5 @@ op
     'skills': ['Python', 'Django', 'Machine Learning'],
     'is_active': True
 }
+Name: Alice
+First Skill: Python
