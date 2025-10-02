@@ -4,8 +4,61 @@ How did you handle failures and retries in your pipeline?
 
 - ## ✅ Project Overview
 **Use Case:** Streaming and processing user activity logs from a web application for real-time analytics and ML.
-
 **Goal:** Build a scalable, fault-tolerant distributed data pipeline to ingest, process, and store event data in near real-time.
+
+## 🚀 What It Does (Overview)
+
+This distributed data pipeline is built to:
+- Ingest user activity events from apps/websites
+- Process data in real-time (clean, enrich, aggregate)
+- Store results for analytics, dashboards, and ML use cases
+- Ensure low-latency, high-throughput, and fault-tolerance at scale
+
+---
+
+## 🔄 Data Flow (Step-by-Step)
+
+1. **User Interaction**
+   - A user performs an action (e.g., click, view, purchase).
+
+2. **Event Generation**
+   - The app/service logs this event and sends it to **Apache Kafka**.
+
+3. **Kafka (Ingestion Layer)**
+   - Kafka acts as the message broker.
+   - Events are partitioned and stored durably for real-time or replayed processing.
+
+4. **Stream Processing (Flink / Spark)**
+   - Reads events from Kafka in real-time.
+   - Performs:
+     - Data cleaning
+     - Enrichment (e.g., IP → location)
+     - Aggregations (e.g., sessions, totals)
+   - Writes processed data to storage systems.
+
+5. **Storage Layer**
+   - **Amazon S3** → Raw and processed logs (data lake)
+   - **Snowflake / Redshift** → For analytics, dashboards
+   - **Redis / Cassandra** → For real-time ML features or APIs
+
+6. **Monitoring & Orchestration**
+   - **Airflow** → Schedules batch tasks, handles dependencies and retries
+   - **Prometheus / Grafana / Datadog** → Monitors metrics like lag, throughput, failure rates
+
+7. **Failure Handling**
+   - Automatic retries from last checkpoint or Kafka offset
+   - Malformed or failed records sent to a **Dead Letter Queue (DLQ)**
+   - Alerts and dashboards track performance and failures
+
+---
+
+## ✅ Summary
+
+- Real-time processing with sub-10s latency
+- Scales to billions of events/day
+- Fault-tolerant via checkpointing and retries
+- Supports analytics, dashboards, and ML
+
 
 ---
 
