@@ -167,4 +167,80 @@ Always end your session.
 ```python
 spark.stop()
 ```
+***Final example**
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, when, year, avg
+
+# 1️⃣ Create Spark session
+spark = SparkSession.builder \
+    .appName("ETL_S3_to_S3_Redshift") \
+    .getOrCreate()
+
+# 2️⃣ Define input and output locations
+input_path = "s3a://my-bucket/raw/employees.csv"
+output_path = "s3a://my-bucket/processed/employees/"
+
+# 3️⃣ Read data from S3 (CSV)
+df = spark.read.option("header", True).option("inferSchema", True).csv(input_path)
+
+print("=== Raw Data ===")
+df.show()
+
+# 4️⃣ Data Cleaning
+# Remove rows with missing essential fields
+df_clean = df.dropna(subset=["id", "name", "department", "salary"])
+
+# Filter valid age (>= 18)
+df_clean = df_clean.filter(col("age") >= 18)
+
+# 5️⃣ Data Transformation
+# Add age group and tenure years
+df_transformed = (
+    df_clean
+    .withColumn("age_group",
+        when(col("age") < 30, "Young")
+        .when(col("age") < 50, "Mid")
+        .otherwise("Senior"))
+    .withColumn("join_year", year(col("join_date")))
+)
+
+# 6️⃣ Aggregate (average salary per department)
+avg_salary = (
+    df_transformed.groupBy("department")
+    .agg(avg("salary").alias("avg_salary"))
+)
+
+print("=== Aggregated Data ===")
+avg_salary.show()
+
+# 7️⃣ Write transformed data back to S3 (Parquet format, partitioned by department)
+df_transformed.write \
+    .mode("overwrite") \
+    .partitionBy("department") \
+    .parquet(output_path)
+
+print("✅ Data successfully written to:", output_path)
+
+# 8️⃣ Optional: Write aggregated data to Redshift
+# -----------------------------------------------
+# Uncomment if you have a Redshift cluster and JDBC connector configured
+#
+# jdbc_url = "jdbc:redshift://<cluster-endpoint>:5439/dev"
+# redshift_table = "public.department_salary"
+# iam_role = "arn:aws:iam::<account-id>:role/MyRedshiftCopyRole"
+#
+# avg_salary.write \
+#     .format("jdbc") \
+#     .option("url", jdbc_url) \
+#     .option("dbtable", redshift_table) \
+#     .option("aws_iam_role", iam_role) \
+#     .mode("overwrite") \
+#     .save()
+#
+# print("✅ Aggregated data written to Redshift table:", redshift_table)
+
+# 9️⃣ Stop the Spark session
+spark.stop()
+```
 
