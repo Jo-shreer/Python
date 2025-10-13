@@ -10,7 +10,7 @@ pip install pyspark notebook
 jupyter notebook
 
 # Create Your First Spark Session
-Everything in PySpark starts with a SparkSession — the entry point for Spark functionality.
+Step 1. Everything in PySpark starts with a SparkSession — the entry point for Spark functionality.
 
 ``` python 
 from pyspark.sql import SparkSession
@@ -26,3 +26,15 @@ print("Spark is ready!")
 
 > .master("local[*]") — run locally using all CPU cores
 (In AWS Glue or EMR, Spark manages this automatically)
+
+Step 2: Load Data into a DataFrame
+> PySpark reads data from many sources: CSV, JSON, Parquet, S3, JDBC, etc.
+
+```python
+df = spark.read \
+    .option("header", True) \
+    .option("inferSchema", True) \
+    .csv("employees.csv")
+
+df.show() or df.dispaly
+```
