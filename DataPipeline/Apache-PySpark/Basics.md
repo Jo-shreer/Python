@@ -26,16 +26,25 @@
                     
 • **RDD (Resilient Distributed Dataset)** – The low-level data structure in Spark. 
                                             It represents an immutable, distributed collection of data across nodes in a cluster.
+                                            
 • **DataFrame** – A distributed collection of data organized into named columns (like a SQL table). 
                   It’s built on top of RDDs and provides high-level operations.
+                  
 • **Dataset** – A strongly-typed distributed data structure (mainly used in Scala/Java). 
                 In PySpark, DataFrames are used instead.
+                
 • **Transformations** – Lazy operations (like filter, map, select) that describe how data should be modified but don’t execute immediately.
+
 • **Actions** – Operations (like show, count, collect, write) that trigger the actual computation and return a result.
+
 • **Spark SQL** – A module that lets you query structured data using SQL syntax on top of DataFrames.
+
 • **PySpark Streaming** – A module to process real-time data streams (for example, data from Kafka or sockets).
+
 • **MLlib** – Spark’s machine learning library for scalable ML algorithms (classification, regression, clustering, etc.).
+
 • **GraphX / GraphFrames** – Used for graph-based computations (e.g., PageRank, social network analysis).
+
 • **Cluster Manager** – Allocates resources and manages nodes (examples: YARN, Kubernetes, or Spark Standalone).
 
 <img width="887" height="391" alt="image" src="https://github.com/user-attachments/assets/67ca4bbd-00c3-4791-bcff-f4c829c0c13e" />
