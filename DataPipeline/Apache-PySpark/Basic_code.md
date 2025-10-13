@@ -226,19 +226,19 @@ print("✅ Data successfully written to:", output_path)
 # -----------------------------------------------
 # Uncomment if you have a Redshift cluster and JDBC connector configured
 #
-# jdbc_url = "jdbc:redshift://<cluster-endpoint>:5439/dev"
-# redshift_table = "public.department_salary"
-# iam_role = "arn:aws:iam::<account-id>:role/MyRedshiftCopyRole"
-#
-# avg_salary.write \
-#     .format("jdbc") \
-#     .option("url", jdbc_url) \
-#     .option("dbtable", redshift_table) \
-#     .option("aws_iam_role", iam_role) \
-#     .mode("overwrite") \
-#     .save()
-#
-# print("✅ Aggregated data written to Redshift table:", redshift_table)
+jdbc_url = "jdbc:redshift://<cluster-endpoint>:5439/dev"
+redshift_table = "public.department_salary"
+iam_role = "arn:aws:iam::<account-id>:role/MyRedshiftCopyRole"
+
+ avg_salary.write \
+     .format("jdbc") \
+     .option("url", jdbc_url) \
+     .option("dbtable", redshift_table) \
+     .option("aws_iam_role", iam_role) \
+     .mode("overwrite") \
+     .save()
+
+ print("✅ Aggregated data written to Redshift table:", redshift_table)
 
 # 9️⃣ Stop the Spark session
 spark.stop()
