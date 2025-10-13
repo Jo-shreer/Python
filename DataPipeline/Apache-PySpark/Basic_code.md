@@ -32,9 +32,9 @@ Step 2: Load Data into a DataFrame
 
 ```python
 df = spark.read \
+    .csv("employees.csv")\
     .option("header", True) \
-    .option("inferSchema", True) \
-    .csv("employees.csv")
-
+    .option("inferSchema", True) 
+   
 df.show() or df.dispaly
 ```
