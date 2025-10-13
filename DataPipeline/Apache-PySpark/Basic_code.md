@@ -244,3 +244,46 @@ iam_role = "arn:aws:iam::<account-id>:role/MyRedshiftCopyRole"
 spark.stop()
 ```
 
+**Step 6: Running on AWS**
+Option 1 — AWS Glue Job
+Go to AWS Glue → Jobs → Add job
+Choose type: Spark (Python)
+Upload this script
+Provide IAM role and S3 paths
+Run job → Glue handles cluster creation, execution, and teardown
+
+Option 2 — AWS EMR Step
+Create an EMR cluster (with Spark)
+Add a step:
+spark-submit s3://my-bucket/scripts/etl_s3_to_s3.py
+
+Option 3 — Locally
+If your AWS credentials are configured:
+spark-submit etl_s3_to_s3.py
+(use s3a:// for S3 paths)
+
+**Step 7: Query the Output (Optional)**
+After the Glue Crawler crawls the processed Parquet data, you can query it via Athena or Redshift Spectrum
+```sql
+SELECT department, COUNT(*), AVG(salary)
+FROM processed_employees
+GROUP BY department;
+```
+**Summary — Your End-to-End ETL Flow**
+       +---------------------+
+       |   S3 (raw CSVs)     |
+       +---------+-----------+
+                 |
+                 ▼
+        PySpark / AWS Glue
+    (ETL transformation logic)
+                 |
+         ┌───────┴─────────┐
+         ▼                 ▼
+ +----------------+   +----------------+
+ | S3 (processed) |   |  Redshift Table|
+ | Parquet output |   |  (aggregated)  |
+ +----------------+   +----------------+
+
+ 
+
