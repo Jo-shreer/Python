@@ -23,6 +23,7 @@
                      It allows you to create DataFrames, run SQL queries, and manage Spark configurations.
 • SparkContext – The core connection to the Spark cluster. 
                     It manages the communication between your application and the cluster. (SparkSession internally creates it.)
+                    
 • **RDD (Resilient Distributed Dataset)** – The low-level data structure in Spark. 
                                             It represents an immutable, distributed collection of data across nodes in a cluster.
 • **DataFrame** – A distributed collection of data organized into named columns (like a SQL table). 
