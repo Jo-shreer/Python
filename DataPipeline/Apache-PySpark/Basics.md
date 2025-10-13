@@ -40,6 +40,33 @@
 <img width="887" height="391" alt="image" src="https://github.com/user-attachments/assets/67ca4bbd-00c3-4791-bcff-f4c829c0c13e" />
 
 
+## Comparison
+📊 COMPARISON: PySpark vs Pandas vs Hadoop MapReduce
+
+| Feature / Aspect              | PySpark                                  | Pandas                                  | Hadoop MapReduce                         |
+|-------------------------------|-------------------------------------------|------------------------------------------|-------------------------------------------|
+| **Language**                  | Python (wrapper over Apache Spark)        | Python                                   | Java (primarily)                          |
+| **Processing Type**            | Distributed, In-Memory                    | Single Machine, In-Memory                | Distributed, Disk-Based                   |
+| **Speed**                      | Very Fast (in-memory DAG engine)          | Fast for small data, slow for large      | Slow (due to disk I/O between map & reduce) |
+| **Scalability**                | Highly Scalable (cluster-based)           | Limited by single machine’s RAM          | Highly Scalable (cluster-based)           |
+| **Ease of Use**                | Easy (Pythonic DataFrame API)             | Very Easy (intuitive API)                | Complex (requires Java code)              |
+| **Fault Tolerance**            | Yes (RDD lineage recovery)                | No (fails if memory error)               | Yes (built-in task retry)                 |
+| **Data Size Handling**         | Handles GBs–PBs of data                  | Handles MBs–a few GBs only              | Handles TBs–PBs of data                  |
+| **Execution Model**            | Lazy Evaluation (optimized DAG)           | Immediate Execution                      | Step-by-step Map → Shuffle → Reduce       |
+| **Use Cases**                  | ETL, Big Data Analytics, ML, Streaming    | Small-scale data analysis, prototyping   | Large batch data processing               |
+| **Machine Learning Support**   | Yes (Spark MLlib)                         | Yes (via Scikit-learn integration)       | No (needs external frameworks)            |
+| **Real-time Streaming**        | Yes (Structured Streaming)                | No                                       | No                                        |
+| **Integration**                | Excellent (AWS, Hive, S3, Kafka, etc.)    | Limited (local or simple DBs)            | Good (HDFS, Hive, Pig, etc.)              |
+| **Deployment**                 | Local or Cluster (EMR, Glue, YARN, K8s)   | Local Only                               | Cluster Only (Hadoop ecosystem)           |
+| **Performance Tuning**         | Built-in optimizer (Catalyst)             | Manual                                   | Manual                                   |
+
+✅ **Summary:**
+- **PySpark** = Best for large-scale, distributed big data processing with Python.
+- **Pandas** = Best for small datasets and local data exploration.
+- **Hadoop MapReduce** = Best for legacy batch jobs or when disk-based fault tolerance is critical.
+
+
+
 
 
 
