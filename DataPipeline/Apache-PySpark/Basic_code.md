@@ -21,5 +21,7 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 print("Spark is ready!")
-
 ```
+> .appName() — name of your app (appears in Spark UI)
+> .master("local[*]") — run locally using all CPU cores
+(In AWS Glue or EMR, Spark manages this automatically)
