@@ -21,6 +21,7 @@
 ## key components of PySpark
 • SparkSession – The entry point to any PySpark program. 
                      It allows you to create DataFrames, run SQL queries, and manage Spark configurations.
+                     
 • SparkContext – The core connection to the Spark cluster. 
                     It manages the communication between your application and the cluster. (SparkSession internally creates it.)
                     
