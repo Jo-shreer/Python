@@ -1,0 +1,436 @@
+# Sorting in Python
+
+## 1. `sorted()`
+Creates a **NEW sorted list**.
+
+
+### Python
+```python
+numbers = [5, 2, 8, 1, 3]
+result = sorted(numbers)
+print(result)
+```
+### Output
+```text
+[1, 2, 3, 5, 8]
+```
+
+### Important
+The original list is NOT changed.
+```python
+numbers = [5, 2, 8, 1, 3]
+result = sorted(numbers)
+print(numbers)
+print(result)
+```
+Output:
+
+```text
+[5, 2, 8, 1, 3]
+[1, 2, 3, 5, 8]
+```
+
+---
+## 2. `list.sort()`
+`sort()` changes the **original list**.
+
+### Python
+```python
+numbers = [5, 2, 8, 1, 3]
+numbers.sort()
+print(numbers)
+```
+Output:
+```text
+[1, 2, 3, 5, 8]
+```
+`sort()` returns `None`.
+```python
+numbers = [5, 2, 8]
+result = numbers.sort()
+print(result)
+print(numbers)
+```
+Output:
+```text
+None
+[2, 5, 8]
+```
+
+--
+### Easy Memory
+```text
+sorted() → NEW list
+sort()   → ORIGINAL list
+```
+---
+## 4. Descending Order
+Use `reverse=True`.
+```python
+numbers = [5, 2, 8, 1, 3]
+result = sorted(numbers, reverse=True)
+print(result)
+```
+
+Output:
+```text
+[8, 5, 3, 2, 1]
+```
+
+With `sort()`:
+```python
+numbers = [5, 2, 8, 1, 3]
+numbers.sort(reverse=True)
+print(numbers)
+```
+
+Output:
+```text
+[8, 5, 3, 2, 1]
+```
+```text
+reverse=True → descending order
+```
+---
+## 5. Sorting Strings
+```python
+names = ["John", "Alice", "Mike"]
+result = sorted(names)
+print(result)
+```
+
+Output:
+```text
+["Alice", "John", "Mike"]
+```
+
+---
+## 6. Sorting by Length
+Use `key=` to tell Python what to sort by.
+
+```python
+names = ["John", "Alexander", "Bob"]
+result = sorted(names, key=len)
+print(result)
+```
+
+Output:
+```text
+["Bob", "John", "Alexander"]
+```
+
+Pattern:
+```python
+sorted(data, key=function)
+```
+
+Here:
+```python
+key=len
+```
+
+means:
+> Sort the strings based on their length.
+---
+
+## 7. Sorting a List of Dictionaries
+This is very important for ETL.
+
+```python
+records = [
+    {"name": "John", "age": 30},
+    {"name": "Sarah", "age": 25},
+    {"name": "Mike", "age": 40}
+]
+
+result = sorted(
+    records,
+    key=lambda x: x["age"]
+)
+print(result)
+```
+
+Output:
+```text
+[
+    {"name": "Sarah", "age": 25},
+    {"name": "John", "age": 30},
+    {"name": "Mike", "age": 40}
+]
+```
+
+### How to understand it
+
+```python
+key=lambda x: x["age"]
+```
+Means:
+> For every record, use the `age` value for sorting.
+
+---
+## 8. Sort Records in Descending Order
+
+```python
+result = sorted(
+    records,
+    key=lambda x: x["age"],
+    reverse=True
+)
+print(result)
+```
+
+Result:
+```text
+Mike  → 40
+John  → 30
+Sarah → 25
+```
+---
+
+## 9. Sorting by Multiple Fields
+Sort first by `age`, then by `name`.
+
+```python
+records = [
+    {"name": "John", "age": 30},
+    {"name": "Sarah", "age": 25},
+    {"name": "Mike", "age": 30}
+]
+
+result = sorted(
+    records,
+    key=lambda x: (x["age"], x["name"])
+)
+print(result)
+```
+
+Output:
+```text
+[
+    {"name": "Sarah", "age": 25},
+    {"name": "John", "age": 30},
+    {"name": "Mike", "age": 30}
+]
+```
+Pattern:
+
+```python
+key=lambda x: (x["age"], x["name"])
+```
+
+Means:
+```text
+1st priority → age
+2nd priority → name
+```
+---
+## 10. Sort Dictionary by Value
+```python
+scores = {
+    "John": 80,
+    "Sarah": 95,
+    "Mike": 70
+}
+
+result = sorted(
+    scores.items(),
+    key=lambda x: x[1]
+)
+print(result)
+```
+Output:
+```text
+[
+    ("Mike", 70),
+    ("John", 80),
+    ("Sarah", 95)
+]
+```
+Remember:
+```text
+x[0] → key
+x[1] → value
+```
+Therefore:
+```python
+key=lambda x: x[1]
+```
+means:
+> Sort by dictionary value.
+
+---
+## 11. Sort Dictionary by Key
+
+```python
+result = sorted(
+    scores.items(),
+    key=lambda x: x[0]
+)
+print(result)
+```
+
+Here:
+```text
+x[0] → key
+x[1] → value
+```
+So:
+```python
+key=lambda x: x[0]
+```
+
+means:
+> Sort by dictionary key.
+
+---
+# ETL Use Cases
+Sorting is commonly used for:
+- Sorting records by timestamp
+- Sorting transactions by amount
+- Sorting customers by score
+- Finding oldest/newest records
+- Sorting by priority
+- Preparing records before writing output
+- Ordering API/JSON records
+
+## ETL Example — Sort by Timestamp
+
+```python
+records = [
+    {"id": 1, "timestamp": "2026-01-03"},
+    {"id": 2, "timestamp": "2026-01-01"},
+    {"id": 3, "timestamp": "2026-01-02"}
+]
+
+result = sorted(
+    records,
+    key=lambda x: x["timestamp"]
+)
+print(result)
+```
+Result:
+```text
+ID 2 → 2026-01-01
+ID 3 → 2026-01-02
+ID 1 → 2026-01-03
+```
+---
+# Time Complexity
+Python uses **Timsort** for sorting.
+```text
+Typical / Worst case → O(n log n)
+Best case            → O(n)
+```
+
+For interviews, remember:
+```text
+Sorting → O(n log n)
+```
+--
+# Space Complexity
+For interview purposes:
+```text
+Space → O(n)
+```
+
+Remember:
+```text
+sorted()
+→ creates a new list
+```
+---
+
+# Important Interview Questions
+## Q1. Difference between `sorted()` and `sort()`?
+`sorted()` returns a new sorted list and does not modify the original data.
+`list.sort()` modifies the original list in place and returns `None`.
+
+## Q2. How do you sort a list of dictionaries?
+```python
+result = sorted(
+    records,
+    key=lambda x: x["age"]
+)
+```
+## Q3. How do you sort in descending order?
+```python
+result = sorted(
+    records,
+    key=lambda x: x["age"],
+    reverse=True
+)
+```
+## Q4. How do you sort by multiple fields?
+
+```python
+result = sorted(
+    records,
+    key=lambda x: (x["age"], x["name"])
+)
+```
+---
+
+# Most Important Patterns
+### Ascending
+```python
+sorted(data)
+```
+### Descending
+```python
+sorted(data, reverse=True)
+```
+### Sort by a field
+```python
+sorted(
+    data,
+    key=lambda x: x["age"]
+)
+```
+### Sort by a field descending
+```python
+sorted(
+    data,
+    key=lambda x: x["age"],
+    reverse=True
+)
+```
+### Sort by multiple fields
+
+```python
+sorted(
+    data,
+    key=lambda x: (x["age"], x["name"])
+)
+```
+---
+
+# Final Memory
+
+```text
+sorted()
+→ creates NEW sorted list
+
+sort()
+→ modifies ORIGINAL list
+
+reverse=True
+→ descending
+
+key=
+→ tells Python what to sort by
+
+lambda x: x["age"]
+→ sort by age
+
+lambda x: x["timestamp"]
+→ sort by timestamp
+
+lambda x: (x["age"], x["name"])
+→ sort by age, then name
+
+Sorting:
+→ O(n log n) typical/worst case
+
+ETL:
+→ sorting records by timestamp, priority, amount, score, etc.
+```
