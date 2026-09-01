@@ -3,8 +3,6 @@ Checks if the request was successful (status_code == 200).
 Parses the JSON response.
 Prints the joke setup and punchline.
 
-
-
 import requests
 
 response = requests.get("https://official-joke-api.appspot.com/random_joke")
