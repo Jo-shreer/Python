@@ -1,0 +1,1323 @@
+# Python Memory Management — Complete Notes
+
+## 1. How Python Manages Memory
+
+Python manages memory automatically.
+
+When you create an object:
+
+```python
+name = "John"
+numbers = [1, 2, 3]
+```
+
+Python:
+
+1. Creates objects in memory.
+2. Keeps track of references to those objects.
+3. Reclaims memory when objects are no longer needed.
+
+The main mechanisms in CPython are:
+
+```text
+Reference Counting
+        +
+Garbage Collection
+        +
+Python Memory Allocator
+```
+
+You normally do not manually allocate and free memory like in C/C++.
+
+---
+
+## 2. Objects and References
+
+A variable does not directly contain the object. It refers to an object.
+
+```python
+a = [10, 20, 30]
+b = a
+
+print(a)
+print(b)
+
+print(a is b)
+```
+
+Output:
+
+```text
+[10, 20, 30]
+[10, 20, 30]
+True
+```
+
+There is only **one list object**.
+
+```text
+a ─────┐
+       ↓
+   [10, 20, 30]
+       ↑
+b ─────┘
+```
+
+If we modify the object:
+
+```python
+b.append(40)
+
+print(a)
+```
+
+Output:
+
+```text
+[10, 20, 30, 40]
+```
+
+Both variables refer to the same object.
+
+---
+
+## 3. Object Identity — `id()`
+
+Every Python object has an identity during its lifetime.
+
+Use:
+
+```python
+id(object)
+```
+
+Example:
+
+```python
+a = [1, 2, 3]
+b = a
+c = [1, 2, 3]
+
+print(id(a))
+print(id(b))
+print(id(c))
+
+print(a is b)
+print(a is c)
+print(a == c)
+```
+
+Conceptually:
+
+```text
+a and b → same object
+c        → different object
+```
+
+Therefore:
+
+```text
+a is b → True
+a is c → False
+a == c → True
+```
+
+`is` checks identity.
+
+`==` checks equality.
+
+---
+
+## 4. Reference Counting
+
+CPython primarily uses **reference counting**.
+
+Python keeps track of how many references point to an object.
+
+```python
+import sys
+
+a = [10, 20, 30]
+
+print(sys.getrefcount(a))
+
+b = a
+
+print(sys.getrefcount(a))
+
+del b
+
+print(sys.getrefcount(a))
+```
+
+Conceptually:
+
+```text
+a = object
+
+References:
+a → object
+
+b = a
+
+References:
+a ──┐
+    ↓
+  object
+    ↑
+b ──┘
+
+del b
+
+References:
+a → object
+```
+
+As long as `a` still references the object, the object cannot be reclaimed simply because `b` was deleted.
+
+### Important
+
+`sys.getrefcount()` temporarily creates an additional reference while passing the object to the function, so the number is commonly one higher than the intuitive count.
+
+---
+
+## 5. What Happens When Reference Count Becomes Zero?
+
+If an object has no references:
+
+```text
+object
+  ↑
+ no references
+```
+
+CPython can deallocate it immediately through reference counting.
+
+Example:
+
+```python
+a = [1, 2, 3]
+
+del a
+```
+
+After `del a`, assuming there are no other references to that list, its reference count reaches zero and CPython can reclaim it.
+
+---
+
+## 6. `del` Does Not Necessarily Delete the Object
+
+`del` removes a reference.
+
+```python
+a = [1, 2, 3]
+b = a
+
+del a
+
+print(b)
+```
+
+The list still exists because `b` references it.
+
+```text
+a → X
+
+b ─────→ [1, 2, 3]
+```
+
+So:
+
+```text
+del variable
+```
+
+means:
+
+> Remove that reference.
+
+It does **not** necessarily mean:
+
+> Destroy the object immediately.
+
+---
+
+## 7. Garbage Collection
+
+Reference counting alone cannot handle all situations.
+
+The main problem is **reference cycles**.
+
+Example:
+
+```python
+import gc
+
+
+class Employee:
+    pass
+
+
+a = Employee()
+b = Employee()
+
+a.other = b
+b.other = a
+
+del a
+del b
+
+gc.collect()
+```
+
+The objects reference each other:
+
+```text
+Object A ─────→ Object B
+   ↑               |
+   |_______________|
+```
+
+Even after `del a` and `del b`, the objects can still reference each other.
+
+Their reference counts therefore may not reach zero.
+
+Python's cyclic garbage collector can detect such unreachable cycles and reclaim them.
+
+---
+
+## 8. Reference Cycle
+
+A reference cycle occurs when objects reference each other directly or indirectly.
+
+Simple example:
+
+```python
+a = []
+b = []
+
+a.append(b)
+b.append(a)
+```
+
+Relationship:
+
+```text
+a → b
+↑   ↓
+└───┘
+```
+
+If there are no external references to these objects, cyclic GC can eventually reclaim them.
+
+---
+
+## 9. `gc.collect()`
+
+The `gc` module provides access to Python's garbage collector.
+
+```python
+import gc
+
+gc.collect()
+```
+
+This explicitly asks the garbage collector to run.
+
+It is mainly useful when you need to investigate or control cyclic garbage collection.
+
+You normally do **not** need to call `gc.collect()` after every object deletion.
+
+---
+
+## 10. Mutable vs Immutable Objects
+
+### Mutable
+
+Can be changed after creation.
+
+Examples:
+
+```text
+list
+dict
+set
+bytearray
+```
+
+Example:
+
+```python
+a = [1, 2, 3]
+b = a
+
+b.append(4)
+
+print(a)
+```
+
+Output:
+
+```text
+[1, 2, 3, 4]
+```
+
+The same object was modified.
+
+### Immutable
+
+Cannot be changed after creation.
+
+Examples:
+
+```text
+int
+float
+bool
+str
+tuple
+frozenset
+bytes
+```
+
+Example:
+
+```python
+a = 10
+b = a
+
+b = 20
+
+print(a)
+print(b)
+```
+
+Output:
+
+```text
+10
+20
+```
+
+`b = 20` does not modify the integer `10`.
+
+Instead, `b` now refers to another object.
+
+---
+
+## 11. Shallow Copy
+
+A shallow copy creates a new outer object but keeps references to nested objects.
+
+```python
+import copy
+
+
+original = [
+    [1, 2],
+    [3, 4]
+]
+
+shallow = copy.copy(original)
+
+shallow[0].append(99)
+
+print(original)
+print(shallow)
+```
+
+Output:
+
+```text
+[[1, 2, 99], [3, 4]]
+[[1, 2, 99], [3, 4]]
+```
+
+Why?
+
+```text
+original ──→ outer list
+                |
+                +──→ inner list [1, 2]
+                |
+                +──→ inner list [3, 4]
+
+shallow ───→ different outer list
+                |
+                +──→ same inner list [1, 2]
+```
+
+---
+
+## 12. Deep Copy
+
+A deep copy recursively copies nested objects.
+
+```python
+import copy
+
+
+original = [
+    [1, 2],
+    [3, 4]
+]
+
+deep = copy.deepcopy(original)
+
+deep[0].append(99)
+
+print(original)
+print(deep)
+```
+
+Output:
+
+```text
+[[1, 2], [3, 4]]
+[[1, 2, 99], [3, 4]]
+```
+
+Use deep copying carefully because it can consume significant memory and CPU for large objects.
+
+---
+
+## 13. `is` vs `==`
+
+`is` checks whether two references point to the same object.
+
+`==` checks whether two objects have equal values.
+
+```python
+a = [1, 2, 3]
+b = [1, 2, 3]
+
+print(a == b)
+print(a is b)
+```
+
+Output:
+
+```text
+True
+False
+```
+
+Use `is` for identity checks, especially:
+
+```python
+if value is None:
+    ...
+```
+
+Do not use `is` for normal value comparison.
+
+---
+
+## 14. Python Heap
+
+Python objects are generally stored in a memory area managed by Python called the **Python heap**.
+
+For example:
+
+```python
+numbers = [1, 2, 3]
+```
+
+The list object and its contained Python objects occupy memory managed by Python.
+
+You normally do not directly manage these addresses.
+
+Think:
+
+```text
+Python Program
+      ↓
+Python Objects
+      ↓
+Python-managed heap
+```
+
+---
+
+## 15. Python Memory Allocator
+
+Python has its own memory management system.
+
+For many small objects, CPython uses specialized allocators to efficiently manage memory.
+
+You can think of the process roughly as:
+
+```text
+Operating System
+       ↓
+Process Memory
+       ↓
+Python Memory Allocator
+       ↓
+Python Objects
+```
+
+The allocator helps Python avoid asking the operating system for every tiny object allocation.
+
+---
+
+## 16. Stack vs Heap
+
+In general programming terminology:
+
+```text
+Stack → function calls / execution state
+Heap  → dynamically allocated objects
+```
+
+Python's implementation details are more complicated than this simplified model.
+
+For Python interviews, the important point is:
+
+> Python objects are allocated in memory managed by Python, while function execution uses a call stack of frames.
+
+Do not assume that every Python variable itself is simply a raw stack variable containing the object.
+
+---
+
+## 17. Integer Interning
+
+CPython may reuse certain commonly used immutable objects, including small integers.
+
+For example:
+
+```python
+a = 10
+b = 10
+
+print(a is b)
+```
+
+This may be:
+
+```text
+True
+```
+
+because CPython commonly caches small integers.
+
+However, you should **never use `is` to compare numeric values**.
+
+Use:
+
+```python
+a == b
+```
+
+instead.
+
+Interning/caching is an implementation optimization, not something application code should depend on for correctness.
+
+---
+
+## 18. String Interning
+
+Python may also intern some strings.
+
+```python
+a = "hello"
+b = "hello"
+
+print(a == b)
+print(a is b)
+```
+
+`a is b` may be `True`, depending on how the strings were created and the implementation.
+
+Again:
+
+```python
+a == b
+```
+
+should be used for value comparison.
+
+---
+
+## 19. `__slots__`
+
+Normally, instances of Python classes can have a `__dict__` for storing attributes.
+
+Example:
+
+```python
+class Employee:
+
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+```
+
+For classes with very large numbers of instances, `__slots__` can reduce per-instance memory overhead.
+
+```python
+class Employee:
+
+    __slots__ = ("name", "age")
+
+    def __init__(self, name, age):
+        self.name = name
+        self.age = age
+```
+
+`__slots__` restricts which instance attributes can exist and can save memory.
+
+It is most useful when creating very large numbers of small objects.
+
+---
+
+## 20. Generators and Memory
+
+A list stores all its elements.
+
+```python
+numbers = [i for i in range(1_000_000)]
+```
+
+A generator produces values lazily.
+
+```python
+numbers = (i for i in range(1_000_000))
+```
+
+The generator does not create a million-element list in memory at once.
+
+Example:
+
+```python
+def generate_numbers():
+    for i in range(1_000_000):
+        yield i
+
+
+for number in generate_numbers():
+    print(number)
+```
+
+This is useful for large ETL pipelines.
+
+---
+
+## 21. List vs Generator
+
+List:
+
+```python
+numbers = [transform(x) for x in records]
+```
+
+All results are stored in memory.
+
+Generator:
+
+```python
+def transform_records(records):
+
+    for record in records:
+        yield transform(record)
+```
+
+Values are produced one at a time as requested.
+
+Conceptually:
+
+```text
+List:
+records → transform everything → store everything
+
+Generator:
+record → transform → yield
+record → transform → yield
+record → transform → yield
+```
+
+---
+
+## 22. Iterators
+
+An iterator produces values one at a time.
+
+```python
+numbers = iter([1, 2, 3])
+
+print(next(numbers))
+print(next(numbers))
+print(next(numbers))
+```
+
+Output:
+
+```text
+1
+2
+3
+```
+
+A generator is a convenient way to create an iterator.
+
+---
+
+## 23. Memory Usage of Lists
+
+Lists can consume significant memory because they store references to their elements and have internal capacity/overhead.
+
+For example:
+
+```python
+records = []
+
+for i in range(1_000_000):
+    records.append(i)
+```
+
+This can consume substantial memory.
+
+For large datasets, consider:
+
+```text
+Generators
+Chunking
+Batch processing
+Streaming
+```
+
+---
+
+## 24. Dictionaries and Sets
+
+Dictionaries and sets use hash tables and can require significant memory.
+
+Example:
+
+```python
+data = {}
+
+for i in range(1_000_000):
+    data[i] = i
+```
+
+For large datasets, do not assume that dictionary/set memory usage is negligible.
+
+If only a subset of data is needed, consider processing data in batches instead of loading everything.
+
+---
+
+## 25. Memory Leak
+
+A memory leak means the program continues to retain memory that it no longer logically needs.
+
+Example:
+
+```python
+cache = []
+
+
+def process(data):
+    cache.append(data)
+
+
+for i in range(1_000_000):
+    large_data = create_large_data()
+    process(large_data)
+```
+
+If `cache` continuously grows and nothing is removed, the program keeps references to old data.
+
+Therefore the objects cannot be reclaimed.
+
+```text
+Memory leak
+    ↓
+Unnecessary objects remain referenced
+    ↓
+Memory usage keeps increasing
+    ↓
+Eventually possibly
+    ↓
+Out Of Memory (OOM)
+```
+
+A memory leak does **not** mean the program immediately runs out of memory.
+
+---
+
+## 26. Common Causes of Memory Leaks
+
+Common causes include:
+
+### Unbounded caches
+
+```python
+cache[key] = value
+```
+
+without removing old entries.
+
+### Global collections
+
+```python
+global_data.append(data)
+```
+
+where the collection grows indefinitely.
+
+### Long-lived objects holding references
+
+An object may accidentally keep references to large datasets.
+
+### Event handlers / callbacks
+
+Long-lived registrations can keep objects alive if they are never removed.
+
+### Reference cycles
+
+Cycles can be handled by Python's cyclic GC, but complex object graphs can still cause memory-management problems.
+
+### Large temporary objects
+
+Creating unnecessary copies of huge datasets can cause memory pressure.
+
+---
+
+## 27. `tracemalloc`
+
+`tracemalloc` helps identify Python-level memory allocations.
+
+```python
+import tracemalloc
+
+
+tracemalloc.start()
+
+data = [i for i in range(1_000_000)]
+
+snapshot = tracemalloc.take_snapshot()
+
+for stat in snapshot.statistics("lineno")[:5]:
+    print(stat)
+
+tracemalloc.stop()
+```
+
+It can help answer:
+
+```text
+Where is Python allocating memory?
+Which lines are responsible?
+Which parts of the application are growing?
+```
+
+It is not a complete measurement of every byte used by the process, especially memory allocated by native libraries outside Python's tracked allocations.
+
+---
+
+## 28. Garbage Collector Module
+
+The `gc` module allows you to inspect/control cyclic garbage collection.
+
+```python
+import gc
+
+print(gc.isenabled())
+
+gc.collect()
+
+print(gc.get_count())
+```
+
+Useful functions include:
+
+```python
+gc.collect()
+gc.enable()
+gc.disable()
+gc.isenabled()
+gc.get_count()
+```
+
+Normally, leave the garbage collector enabled unless you have a specific reason to tune it.
+
+---
+
+## 29. Chunking / Batch Processing
+
+For large ETL datasets, avoid:
+
+```python
+records = fetch_all_records()
+```
+
+if the dataset is extremely large.
+
+Instead:
+
+```python
+BATCH_SIZE = 1000
+
+
+while True:
+
+    records = fetch_batch(BATCH_SIZE)
+
+    if not records:
+        break
+
+    for record in records:
+
+        transformed = transform(record)
+
+        load(transformed)
+```
+
+Memory usage becomes roughly related to the batch size rather than the entire dataset.
+
+---
+
+## 30. Streaming
+
+Streaming processes data incrementally.
+
+```python
+def read_records(source):
+
+    for record in source:
+        yield record
+
+
+for record in read_records(source):
+
+    transformed = transform(record)
+
+    load(transformed)
+```
+
+Instead of:
+
+```text
+Source
+ ↓
+Load everything into memory
+ ↓
+Transform everything
+ ↓
+Load everything
+```
+
+use:
+
+```text
+Source
+ ↓
+Read one/batch
+ ↓
+Transform
+ ↓
+Load
+ ↓
+Next one/batch
+```
+
+This is especially useful in ETL.
+
+---
+
+## 31. Avoid Unnecessary Copies
+
+This can use additional memory:
+
+```python
+copy1 = records.copy()
+copy2 = list(records)
+copy3 = copy.deepcopy(records)
+```
+
+For very large datasets, unnecessary copies can cause memory pressure.
+
+Prefer processing data in place where safe, or use iterators/generators where appropriate.
+
+Be careful with `deepcopy()` because nested data can become very expensive to duplicate.
+
+---
+
+## 32. Releasing Large References
+
+If a large temporary object is no longer needed:
+
+```python
+records = fetch_large_dataset()
+
+process(records)
+
+del records
+```
+
+`del` removes the reference.
+
+If that was the last reference to the object, CPython may reclaim it immediately through reference counting.
+
+However, `del` should not be treated as a general-purpose memory-management requirement. Usually, good scope design and bounded data processing are more important.
+
+---
+
+## 33. Out Of Memory — OOM
+
+OOM means the process cannot obtain enough memory for what it needs.
+
+A common progression is:
+
+```text
+Large data loaded
+       ↓
+Memory usage increases
+       ↓
+More objects/copies retained
+       ↓
+Available memory decreases
+       ↓
+OOM
+```
+
+A memory leak can cause OOM, but not every OOM is caused by a memory leak.
+
+For example, simply loading a genuinely huge dataset into memory can cause OOM.
+
+---
+
+## 34. Memory Optimization for ETL
+
+For large ETL workloads:
+
+```text
+1. Process in batches
+2. Use generators
+3. Stream when possible
+4. Avoid unnecessary copies
+5. Avoid loading the entire dataset
+6. Limit concurrent tasks
+7. Release large temporary references
+8. Monitor memory
+9. Profile memory problems
+10. Use appropriate data structures
+```
+
+Example:
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+BATCH_SIZE = 1000
+
+
+def process(record):
+    transformed = transform(record)
+    return transformed
+
+
+def run_etl():
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+
+        while True:
+
+            records = fetch_batch(BATCH_SIZE)
+
+            if not records:
+                break
+
+            futures = [
+                executor.submit(process, record)
+                for record in records
+            ]
+
+            for future in as_completed(futures):
+
+                try:
+                    result = future.result()
+                    load(result)
+
+                except Exception as e:
+                    print("Processing failed:", e)
+
+            del records
+```
+
+The important idea is **bounded memory**:
+
+```text
+Not:
+1,000,000 records → memory
+
+Instead:
+1,000 records → process → load
+1,000 records → process → load
+1,000 records → process → load
+...
+```
+
+---
+
+# 35. Multithreading and Memory
+
+Threads share the same process memory.
+
+```text
+Process
+│
+├── Thread 1
+├── Thread 2
+├── Thread 3
+└── Thread 4
+```
+
+This makes sharing data easy, but shared mutable data can cause race conditions.
+
+Threads do not each get a completely separate copy of the process's memory.
+
+---
+
+# 36. Multiprocessing and Memory
+
+Processes have separate memory spaces.
+
+Conceptually:
+
+```text
+Process 1
+   ↓
+Memory 1
+
+Process 2
+   ↓
+Memory 2
+
+Process 3
+   ↓
+Memory 3
+```
+
+Therefore multiprocessing can consume substantially more memory when large datasets are present in multiple processes.
+
+For large ETL workloads, be careful about sending huge objects to multiple processes.
+
+---
+
+# 37. Copying Data Between Processes
+
+When data is sent between processes, Python may need to serialize it.
+
+For example:
+
+```python
+pool.map(transform, records)
+```
+
+may require data to be transferred to worker processes.
+
+Large datasets can therefore cause:
+
+```text
+Serialization cost
++
+Memory usage
++
+IPC overhead
+```
+
+This is one reason to carefully design multiprocessing ETL pipelines.
+
+---
+
+# 38. Memory Management Mental Model
+
+```text
+                 Python Memory
+                       |
+          +------------+------------+
+          |                         |
+    References                  Objects
+          |                         |
+    a ────────→              [1, 2, 3]
+    b ────────→                   |
+          |                        |
+          +---- Reference Count ---+
+                       |
+                 count becomes 0
+                       |
+                  Reclaim object
+
+                OR
+
+             Reference Cycle
+                    |
+                    ↓
+             Cyclic Garbage
+                    |
+                    ↓
+             Garbage Collector
+```
+
+---
+
+# 39. Important Concepts — Quick Revision
+
+| Concept            | Meaning                                                                |
+| ------------------ | ---------------------------------------------------------------------- |
+| Object             | Actual Python data stored/managed in memory                            |
+| Reference          | A variable/name pointing to an object                                  |
+| `id()`             | Object identity                                                        |
+| `is`               | Identity comparison                                                    |
+| `==`               | Value/equality comparison                                              |
+| Reference counting | Tracks references to objects                                           |
+| `del`              | Removes a reference                                                    |
+| Garbage collection | Reclaims unreachable cyclic objects                                    |
+| Reference cycle    | Objects indirectly/directly reference each other                       |
+| `gc.collect()`     | Explicitly requests cyclic GC                                          |
+| Mutable            | Object can change in place                                             |
+| Immutable          | Object cannot be changed in place                                      |
+| Shallow copy       | New outer object, nested references shared                             |
+| Deep copy          | Recursively copies nested objects                                      |
+| Generator          | Produces values lazily                                                 |
+| Iterator           | Produces values one at a time                                          |
+| `__slots__`        | Can reduce per-instance memory overhead                                |
+| Memory leak        | Unnecessary objects remain referenced                                  |
+| OOM                | Process/system cannot provide enough memory                            |
+| `tracemalloc`      | Tracks Python-level memory allocations                                 |
+| Chunking           | Process data in batches                                                |
+| Streaming          | Process data incrementally                                             |
+| Heap               | Memory area where Python-managed objects are allocated                 |
+| GIL                | Limits concurrent Python bytecode execution between threads in CPython |
+
+---
+
+# 40. Interview Questions
+### Q1. How does Python manage memory?
+> Python manages memory automatically. CPython primarily uses reference counting to reclaim objects whose reference count reaches zero, along with cyclic garbage collection to handle unreachable reference cycles. Python also has its own memory allocator for efficiently managing object memory.
+### Q2. What is reference counting?
+> Reference counting tracks how many references point to an object. When the reference count reaches zero, CPython can generally deallocate the object immediately.
+### Q3. What problem does garbage collection solve?
+> Garbage collection primarily handles reference cycles that cannot be reclaimed by simple reference counting.
+### Q4. Does `del` delete an object?
+> `del` removes a reference. If that was the last reference to the object, CPython may deallocate the object as a result of its reference count reaching zero.
+### Q5. What is a memory leak?
+> A memory leak occurs when a program unnecessarily retains references to objects that it no longer needs, preventing their memory from being reclaimed. If memory keeps accumulating, it can eventually lead to OOM.
+### Q6. What is the difference between shallow and deep copy?
+> A shallow copy creates a new outer object but shares references to nested objects. A deep copy recursively copies nested objects as well.
+### Q7. What is the difference between `is` and `==`?
+> `is` checks object identity, while `==` checks value equality.
+### Q8. How would you process a 100 GB ETL dataset without running out of memory?
+> I would avoid loading the entire dataset into memory. I would use streaming or chunked/batch processing, generators where appropriate, avoid unnecessary copies, control concurrency, and monitor/profile memory usage.
+### Q9. How can you investigate a Python memory problem?
+> I would first monitor the process's memory growth and then use tools such as `tracemalloc` to identify Python-level allocation sources. I would also inspect caches, global collections, retained references, large temporary objects, and object lifetimes.
+### Q10. Does Python automatically prevent memory leaks?
+> Python automatically manages object lifetime, but application-level memory leaks can still occur when the program unintentionally keeps references to objects it no longer needs.
+---
+
+# 41. Final Interview Summary
+
+> **Python uses automatic memory management. In CPython, reference counting is the primary mechanism for reclaiming objects, while cyclic garbage collection handles unreachable reference cycles. Python objects are managed on the Python heap, and CPython has its own memory allocator. For large ETL workloads, memory should be controlled through batching, streaming, generators, avoiding unnecessary copies, and profiling tools such as `tracemalloc`.**
