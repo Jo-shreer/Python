@@ -1,0 +1,1138 @@
+# AWS Lambda
+
+## 1. What is AWS Lambda?
+
+AWS Lambda is a **serverless compute service** that allows us to run code without managing servers.
+
+We upload our code, configure the required settings, and Lambda runs the code when an event occurs.
+
+### Basic flow
+
+```text
+Event
+  ↓
+Lambda
+  ↓
+Execute code
+  ↓
+Response / Action
+```
+
+Examples of events that can trigger Lambda:
+
+* API Gateway request
+* S3 object upload
+* SQS message
+* EventBridge event
+* Scheduled event
+* Other AWS services
+
+---
+
+# 2. Lambda Execution Model
+
+When Lambda receives a request, AWS creates or reuses an **execution environment**.
+
+The lifecycle is roughly:
+
+```text
+Request
+  ↓
+Create execution environment (if required)
+  ↓
+Start runtime
+  ↓
+Load code
+  ↓
+Initialize dependencies / clients
+  ↓
+Call handler
+  ↓
+Return response
+```
+
+There are two important cases:
+
+* **Cold start**
+* **Warm start**
+
+---
+
+# 3. Cold Start
+
+A cold start happens when Lambda needs to create a **new execution environment** before processing a request.
+
+For example:
+
+```text
+Request
+  ↓
+No existing environment
+  ↓
+Create execution environment
+  ↓
+Start Python runtime
+  ↓
+Load application code
+  ↓
+Initialize dependencies
+  ↓
+Run handler
+```
+
+This adds latency before the actual handler execution.
+
+### Things that can increase cold-start latency
+
+* Large deployment package
+* Large dependencies
+* Unnecessary dependencies
+* Heavy initialization code
+* Loading large files/configuration during initialization
+* VPC networking considerations
+* Initialization of expensive clients/resources
+
+---
+
+# 4. Warm Start
+
+A warm start occurs when Lambda can reuse an existing execution environment.
+
+```text
+Request
+  ↓
+Existing execution environment
+  ↓
+Run handler
+  ↓
+Response
+```
+
+The runtime and initialized code can be reused.
+
+Therefore, warm invocations are generally faster than cold starts.
+
+### Important
+
+Warm environments are **not guaranteed to stay alive indefinitely**.
+
+Lambda can terminate an execution environment when it is no longer needed.
+
+---
+
+# 5. Initialize Clients Outside the Handler
+
+A common best practice is to create reusable AWS clients outside the handler.
+
+### Less efficient approach
+
+```python
+import boto3
+
+def lambda_handler(event, context):
+
+    s3 = boto3.client("s3")
+
+    # process request
+```
+
+The client is created during every invocation of the handler.
+
+### Better approach
+
+```python
+import boto3
+
+s3 = boto3.client("s3")
+
+def lambda_handler(event, context):
+
+    # use existing client
+    response = s3.get_object(
+        Bucket="my-bucket",
+        Key="file.csv"
+    )
+```
+
+The client can potentially be reused when Lambda reuses the execution environment.
+
+### Important distinction
+
+Creating the client outside the handler does **not eliminate cold starts**.
+
+It allows initialization work to happen during the environment initialization phase and allows reusable objects/connections to potentially be reused across warm invocations.
+
+---
+
+# 6. Large Dependencies and Cold Starts
+
+Suppose a Lambda has:
+
+```text
+Large package
+    ↓
+Many dependencies
+    ↓
+More files to load
+    ↓
+More initialization
+    ↓
+Higher cold-start latency
+```
+
+Therefore:
+
+* Remove unnecessary dependencies
+* Keep deployment packages reasonably small
+* Avoid expensive initialization
+* Initialize only what is required
+
+---
+
+# 7. Lambda Handler
+
+The handler is the function Lambda invokes.
+
+Example:
+
+```python
+def lambda_handler(event, context):
+    return {
+        "statusCode": 200,
+        "body": "Hello"
+    }
+```
+
+The handler receives:
+
+### `event`
+
+Contains information about the event that triggered Lambda.
+
+For example, with SQS:
+
+```python
+event["Records"]
+```
+
+### `context`
+
+Contains information about the current Lambda invocation and execution environment.
+
+---
+
+# 8. Lambda Concurrency
+
+**Concurrency** means:
+
+> The number of Lambda executions running at the same time.
+
+Suppose 1 request is being processed:
+
+```text
+Concurrency = 1
+```
+
+Suppose 100 requests are being processed simultaneously:
+
+```text
+Concurrency = 100
+```
+
+### Example
+
+```text
+100 requests
+     ↓
+100 concurrent Lambda executions
+```
+
+Lambda can create multiple execution environments to handle concurrent requests.
+
+---
+
+# 9. Account Concurrency
+
+An AWS account has a regional concurrency limit for Lambda.
+
+Conceptually:
+
+```text
+Account concurrency limit
+        ↓
+      1,000
+        ↓
+Concurrent Lambda executions
+```
+
+If the account reaches its available concurrency, additional invocations may be throttled.
+
+The exact limit depends on the account/region and configuration.
+
+---
+
+# 10. Reserved Concurrency
+
+Reserved concurrency is used to **reserve and cap concurrency for a specific Lambda function**.
+
+Example:
+
+```text
+Function A
+Reserved concurrency = 50
+```
+
+This means the function can use up to 50 concurrent executions.
+
+It also reserves that capacity for the function.
+
+### Why use reserved concurrency?
+
+* Prevent one Lambda from consuming too much account capacity
+* Protect other Lambda functions
+* Control maximum concurrency
+* Help prevent overwhelming downstream systems
+
+Example:
+
+```text
+Lambda A → max 50 concurrent executions
+Lambda B → can use remaining account capacity
+```
+
+---
+
+# 11. Provisioned Concurrency
+
+Provisioned concurrency keeps a configured number of Lambda execution environments **initialized and ready**.
+
+Example:
+
+```text
+Provisioned concurrency = 10
+```
+
+Lambda maintains 10 initialized environments ready to process requests.
+
+This helps reduce cold-start latency for latency-sensitive workloads.
+
+### Reserved vs Provisioned
+
+| Feature | Reserved Concurrency | Provisioned Concurrency |
+|---|---|
+| Reserves concurrency | Yes | Yes, as part of allocated capacity |
+| Limits maximum concurrency | Yes | Not by itself |
+| Keeps environments initialized | No | Yes |
+| Main purpose | Capacity isolation/control | Reduce cold-start latency |
+
+### Easy memory trick
+
+```text
+Reserved
+   ↓
+"How much concurrency can this function use?"
+
+Provisioned
+   ↓
+"How many environments should be ready?"
+```
+
+---
+
+# 12. Lambda Throttling
+
+Throttling happens when Lambda cannot accept another invocation because the available concurrency has been exhausted or another concurrency restriction applies.
+
+Example:
+
+```text
+Concurrency limit = 100
+
+Current executions = 100
+
+New request
+    ↓
+No available concurrency
+    ↓
+Throttle
+```
+
+---
+
+# 13. 429 Errors and Retries
+
+For synchronous invocations, throttling can result in a response such as:
+
+```text
+429 Too Many Requests
+```
+
+The client/application may need to retry, depending on the invocation pattern and retry strategy.
+
+Different event sources have different retry behavior.
+
+For example:
+
+```text
+SQS → Lambda
+```
+
+uses the SQS/Lambda event-source retry behavior rather than simply returning an HTTP 429 to the original caller.
+
+### Interview point
+
+Do not say:
+
+> "Every Lambda throttling error results in 429."
+
+More accurate:
+
+> "Lambda throttling can result in throttling errors such as 429 for synchronous invocations. Asynchronous and event-source integrations have their own retry behavior."
+
+---
+
+# 14. Lambda Idempotency
+
+Idempotency means:
+
+> Processing the same request multiple times should not produce an incorrect additional side effect.
+
+This is important because distributed systems can retry messages.
+
+Example:
+
+```text
+Transaction ID = TXN123
+```
+
+First invocation:
+
+```text
+TXN123
+ ↓
+Process transaction
+ ↓
+Save status = PROCESSED
+```
+
+A retry occurs:
+
+```text
+TXN123
+ ↓
+Check status
+ ↓
+Already processed
+ ↓
+Do not process again
+```
+
+---
+
+# 15. DynamoDB Conditional Write for Idempotency
+
+A simple "check then write" can have a race condition.
+
+### Unsafe approach
+
+```text
+Lambda A → check TXN123 → doesn't exist
+Lambda B → check TXN123 → doesn't exist
+
+Lambda A → process
+Lambda B → process
+```
+
+Both Lambdas can process the transaction.
+
+### Better approach
+
+Use an **atomic conditional write**.
+
+Conceptually:
+
+```text
+Lambda
+  ↓
+Conditional write:
+"Create this transaction only if it doesn't already exist"
+  ↓
+Success → this Lambda owns processing
+Failure → transaction already exists
+```
+
+Example DynamoDB operation:
+
+```python
+table.put_item(
+    Item={
+        "txn_id": "TXN123",
+        "status": "PROCESSING"
+    },
+    ConditionExpression="attribute_not_exists(txn_id)"
+)
+```
+
+If another invocation already created `TXN123`, the conditional write fails.
+
+This prevents two concurrent invocations from both successfully claiming the same transaction.
+
+---
+
+# 16. IAM Execution Role
+
+Lambda normally uses an **execution role** to access AWS resources.
+
+Architecture:
+
+```text
+Lambda
+   ↓
+Assume IAM Role
+   ↓
+IAM Policy
+   ↓
+AWS permissions
+```
+
+Example:
+
+```text
+Lambda execution role
+       ↓
+   Permissions
+       ├── s3:GetObject
+       ├── dynamodb:PutItem
+       └── sqs:SendMessage
+```
+
+The role needs a trust policy allowing the Lambda service to assume it.
+
+The permission policy determines what the Lambda can do.
+
+---
+
+# 17. Least Privilege
+
+Lambda should receive only the permissions it actually requires.
+
+For example, if Lambda only needs to read files:
+
+```text
+s3:GetObject
+```
+
+is preferable to:
+
+```text
+s3:*
+```
+
+when possible.
+
+### Principle
+
+```text
+Give only the permissions required
+        ↓
+Least privilege
+```
+
+---
+
+# 18. Lambda + SQS
+
+Lambda can consume messages from SQS using an **Event Source Mapping**.
+
+Your ETL architecture:
+
+```text
+S3
+ ↓
+Validation Lambda
+ ↓
+DynamoDB
+ ↓
+SQS
+ ↓
+Lambda Event Source Mapping
+ ↓
+Processing Lambda
+```
+
+---
+
+# 19. Who puts the message into SQS?
+
+In our architecture:
+
+> **Validation Lambda is the producer.**
+
+It sends the S3 file key to SQS using `SendMessage`.
+
+Example:
+
+```json
+{
+  "file_key": "incoming/customer_20260829.csv"
+}
+```
+
+So:
+
+```text
+Lambda 1
+   │
+   │ SendMessage
+   ↓
+SQS
+```
+
+---
+
+# 20. Does SQS contain the actual CSV?
+
+No.
+
+The actual CSV remains in S3.
+
+```text
+S3
+ └── customer_20260829.csv
+
+SQS
+ └── {
+       "file_key": "incoming/customer_20260829.csv"
+     }
+```
+
+SQS contains the **message/file key**, not the actual large file.
+
+The processing Lambda uses the key to retrieve the file from S3.
+
+---
+
+# 21. How does Lambda 2 consume SQS?
+
+We configure:
+
+```text
+SQS Queue
+    ↓
+Event Source Mapping
+    ↓
+Lambda 2
+```
+
+AWS Lambda's event source mapping polls the SQS queue on the application's behalf.
+
+We don't normally write:
+
+```python
+sqs.receive_message()
+```
+
+inside Lambda 2 for this architecture.
+
+Conceptually:
+
+```text
+SQS
+ ↑
+ │ AWS-managed polling
+ │
+Lambda Event Source Mapping
+ ↓
+Lambda 2
+```
+
+---
+
+# 22. SQS Message Processing
+
+Lambda receives SQS records:
+
+```python
+def lambda_handler(event, context):
+
+    for record in event["Records"]:
+
+        message = json.loads(record["body"])
+
+        file_key = message["file_key"]
+
+        # Process file
+```
+
+The Lambda can then:
+
+```text
+SQS message
+    ↓
+Extract file key
+    ↓
+Check DynamoDB
+    ↓
+Read CSV from S3
+    ↓
+Start Step Functions
+```
+
+---
+
+# 23. SQS Visibility Timeout
+
+When Lambda receives a message, SQS temporarily hides that message from other consumers.
+
+This is the **visibility timeout**.
+
+Conceptually:
+
+```text
+SQS
+ ↓
+Lambda receives message
+ ↓
+Message becomes temporarily invisible
+ ↓
+Lambda processes message
+```
+
+If processing succeeds:
+
+```text
+Lambda succeeds
+ ↓
+Message deleted
+```
+
+If processing fails:
+
+```text
+Lambda fails
+ ↓
+Visibility timeout expires
+ ↓
+Message becomes visible
+ ↓
+Retry
+```
+
+---
+
+# 24. Dead Letter Queue (DLQ)
+
+If a message repeatedly fails processing, it can eventually be moved to a **Dead Letter Queue**.
+
+```text
+SQS
+ ↓
+Lambda
+ ↓
+FAIL
+ ↓
+Retry
+ ↓
+Retry
+ ↓
+Retry
+ ↓
+Maximum receive count
+ ↓
+DLQ
+```
+
+The DLQ helps isolate messages that require investigation.
+
+---
+
+# 25. Lambda + Step Functions
+
+In our ETL architecture, the processing Lambda starts the Step Functions workflow.
+
+```text
+SQS
+ ↓
+Processing Lambda
+ ↓
+Start Step Functions
+ ↓
+ETL workflow
+ ↓
+Redshift
+```
+
+The Lambda doesn't need to perform the entire ETL workflow itself.
+
+Step Functions handles orchestration.
+
+---
+
+# 26. Lambda Environment Variables
+
+Configuration values can be passed using environment variables.
+
+Example:
+
+```text
+QUEUE_URL
+TABLE_NAME
+ENVIRONMENT
+```
+
+Python:
+
+```python
+import os
+
+queue_url = os.environ["QUEUE_URL"]
+```
+
+Avoid storing plaintext secrets in Lambda environment variables when a secret-management solution such as Secrets Manager is more appropriate.
+
+---
+
+# 27. Lambda + Secrets Manager + KMS
+
+For application secrets:
+
+```text
+Lambda
+   ↓
+Secrets Manager
+   ↓
+Secret
+```
+
+Secrets Manager provides secure storage and retrieval of secrets.
+
+KMS can be involved in encryption/decryption.
+
+Conceptually:
+
+```text
+Lambda
+  ↓
+Secrets Manager
+  ↓
+Encrypted secret
+  ↓
+KMS
+```
+
+Lambda needs the appropriate IAM permissions to retrieve the secret and, depending on the configuration, use the relevant KMS key.
+
+### Easy distinction
+
+```text
+Secrets Manager
+→ Where we store/manage secrets
+
+KMS
+→ Encryption key management / cryptographic operations
+```
+
+---
+
+# 28. Lambda Monitoring with CloudWatch
+
+CloudWatch is used to monitor Lambda.
+
+Important metrics include:
+
+* Invocations
+* Errors
+* Duration
+* Throttles
+* Concurrent executions
+
+CloudWatch Logs contain application logs and exceptions.
+
+Example:
+
+```text
+Lambda
+ ↓
+CloudWatch Logs
+ ↓
+Exception / stack trace
+```
+
+---
+
+# 29. CloudWatch Troubleshooting
+
+Suppose Lambda starts returning errors.
+
+First investigate:
+
+```text
+CloudWatch Logs
+ ↓
+Exception
+ ↓
+Root cause
+```
+
+Then correlate with metrics:
+
+```text
+Errors
+Duration
+Throttles
+Concurrency
+```
+
+Example:
+
+```text
+Errors suddenly increased
+        ↓
+Check CloudWatch Logs
+        ↓
+AccessDeniedException
+        ↓
+Check IAM permissions
+```
+
+---
+
+# 30. Lambda Timeout
+
+Lambda has a configured maximum execution time.
+
+If the function exceeds its timeout:
+
+```text
+Lambda starts
+ ↓
+Processing takes too long
+ ↓
+Timeout
+```
+
+Investigate:
+
+* Downstream service latency
+* Database queries
+* Network calls
+* Large file processing
+* Inefficient code
+* External API calls
+
+For long-running workflows, use an orchestration/service appropriate to the workload rather than trying to make one Lambda perform everything.
+
+---
+
+# 31. Lambda Layers
+
+Lambda Layers allow shared code/dependencies to be packaged separately from the main function deployment package.
+
+Useful for:
+
+* Shared libraries
+* Common dependencies
+* Shared utility code
+
+However, layers are not automatically a performance solution. Large or numerous layers can also contribute to initialization overhead.
+
+---
+
+# 32. Lambda Packaging
+
+Lambda deployment packages contain the application code and required dependencies.
+
+Keep packages efficient:
+
+```text
+Avoid unnecessary dependencies
+Avoid unused libraries
+Keep deployment size reasonable
+```
+
+Large packages can contribute to cold-start latency.
+
+---
+
+# 33. Our ETL Architecture
+
+The Lambda components we've discussed fit into this architecture:
+
+```text
+                    S3
+                     │
+                     │ CSV uploaded
+                     ↓
+             Validation Lambda
+                     │
+             ┌───────┴────────┐
+             ↓                ↓
+         DynamoDB             SQS
+      file key/status       file key
+                                │
+                                ↓
+                       Event Source Mapping
+                                │
+                                ↓
+                       Processing Lambda
+                                │
+                     ┌──────────┴──────────┐
+                     ↓                     ↓
+                    S3                 DynamoDB
+               read actual CSV        check status
+                     │
+                     ↓
+                Step Functions
+                     │
+                     ↓
+                  Redshift
+```
+
+---
+
+# 34. Lambda Interview Questions
+
+## Q1. What is a cold start?
+
+**Answer:**
+
+> A cold start occurs when Lambda needs to create and initialize a new execution environment before processing an invocation. Runtime startup, loading code and dependencies, and initialization logic can contribute to the additional latency.
+
+---
+
+## Q2. How can you reduce cold-start latency?
+
+**Answer:**
+
+> I would keep the deployment package and dependencies lean, avoid unnecessary initialization work, reuse clients where appropriate, and use provisioned concurrency for latency-sensitive workloads where predictable startup latency is important.
+
+---
+
+## Q3. Reserved vs Provisioned Concurrency?
+
+**Answer:**
+
+> Reserved concurrency controls and reserves the concurrency available to a function, helping isolate it from other functions. Provisioned concurrency keeps a configured number of execution environments initialized and ready, primarily to reduce cold-start latency.
+
+---
+
+## Q4. What happens when Lambda is throttled?
+
+**Answer:**
+
+> Lambda rejects or delays additional executions when concurrency capacity or another applicable limit has been reached. For synchronous invocations this can result in throttling errors such as HTTP 429. Event-driven integrations have their own retry behavior.
+
+---
+
+## Q5. How do you handle duplicate Lambda processing?
+
+**Answer:**
+
+> I use idempotency. For example, I can use a transaction ID or file key as an idempotency key and use a DynamoDB conditional write to atomically claim the item. If another invocation has already claimed or processed it, the duplicate invocation doesn't perform the side effect again.
+
+---
+
+## Q6. Why use SQS before Lambda processing?
+
+**Answer:**
+
+> SQS decouples ingestion from processing and provides buffering when the incoming workload is higher than the processing capacity. It also provides retry behavior and can use a DLQ for messages that repeatedly fail.
+
+---
+
+## Q7. Does SQS contain the actual file?
+
+**Answer:**
+
+> No. The actual CSV remains in S3. We put the S3 object key and required metadata into the SQS message. The consumer Lambda uses that key to retrieve the actual file from S3.
+
+---
+
+## Q8. Who puts the file key into SQS?
+
+**Answer:**
+
+> The validation Lambda acts as the producer. After validating the file and updating DynamoDB, it calls the SQS SendMessage API and puts the S3 file key into the queue.
+
+---
+
+## Q9. How does Lambda consume SQS?
+
+**Answer:**
+
+> We configure an SQS event source mapping for the Lambda. AWS manages the polling of the SQS queue and invokes the Lambda with available messages.
+
+---
+
+## Q10. How would you troubleshoot a Lambda returning 500 errors?
+
+**Answer:**
+
+> I would first check CloudWatch Logs for the exception and stack trace. Then I would check Lambda metrics such as Errors, Duration, Throttles and concurrency. I would also investigate downstream dependencies such as S3, DynamoDB, SQS or external APIs, and verify IAM permissions if the logs indicate an authorization problem.
+
+---
+
+# 35. Key Lambda Mental Model
+
+Remember these:
+
+```text
+Cold start
+→ New environment must be initialized
+
+Warm start
+→ Existing environment can be reused
+
+Concurrency
+→ Number of executions running at once
+
+Reserved concurrency
+→ Control/reserve concurrency for a function
+
+Provisioned concurrency
+→ Keep execution environments initialized
+
+Throttling
+→ No available capacity / applicable limit reached
+
+Idempotency
+→ Repeated processing should not create duplicate side effects
+
+Execution role
+→ Identity Lambda assumes to access AWS resources
+
+CloudWatch
+→ Logs + metrics + alarms
+
+SQS Event Source Mapping
+→ AWS-managed polling that invokes Lambda
+
+S3
+→ Stores actual file
+
+SQS
+→ Carries file key/message
+
+Step Functions
+→ Orchestrates the ETL workflow
+```
+
+# 36. One-Line Architecture Summary
+
+For our ETL project:
+
+```text
+S3 stores the CSV
+        ↓
+Lambda 1 validates it
+        ↓
+DynamoDB tracks metadata/status
+        ↓
+SQS buffers the file-processing request
+        ↓
+Lambda 2 consumes the SQS message
+        ↓
+Step Functions orchestrates the ETL
+        ↓
+Redshift performs the warehouse processing
+```
