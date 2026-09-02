@@ -1,0 +1,1015 @@
+# AWS API Gateway — Interview Notes
+
+## 1. What is API Gateway?
+
+**Amazon API Gateway is a managed service used to create, publish, secure, monitor, and manage APIs.**
+
+The simplest mental model is:
+
+```text
+Client
+  |
+  | HTTP request
+  v
+API Gateway
+  |
+  v
+Lambda / Backend
+```
+
+For example:
+
+```text
+GET /customers/123
+        |
+        v
+   API Gateway
+        |
+        v
+      Lambda
+        |
+        v
+   DynamoDB
+```
+
+API Gateway acts as the **front door** to your backend.
+
+---
+
+# 2. Why Do We Need API Gateway?
+
+A client should generally not directly invoke your Lambda function as its public HTTP API.
+
+Instead:
+
+```text
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Lambda
+```
+
+API Gateway provides capabilities such as:
+
+* HTTP/REST API endpoints
+* Routing
+* Authentication/authorization
+* Throttling
+* Request validation
+* Monitoring
+* Logging
+* CORS configuration
+* Integration with Lambda and other backends
+
+---
+
+# 3. API Gateway + Lambda
+
+This is one of the most common serverless architectures:
+
+```text
+                API Gateway
+                    |
+             HTTP request
+                    |
+                    v
+                 Lambda
+                    |
+             +------+------+
+             |             |
+             v             v
+         DynamoDB         S3
+```
+
+For example:
+
+```text
+POST /customers
+```
+
+API Gateway receives the request and invokes Lambda.
+
+Lambda might execute:
+
+```python
+def lambda_handler(event, context):
+    # validate request
+    # process business logic
+    # write to DynamoDB
+    ...
+```
+
+The Lambda response is returned through API Gateway to the client.
+
+---
+
+# 4. Example Request
+
+Suppose the client sends:
+
+```http
+POST /customers
+Content-Type: application/json
+```
+
+with:
+
+```json
+{
+  "name": "John",
+  "country": "Ireland"
+}
+```
+
+The flow is:
+
+```text
+Client
+  |
+  | POST /customers
+  | JSON body
+  v
+API Gateway
+  |
+  v
+Lambda
+  |
+  v
+DynamoDB
+```
+
+Lambda processes the request and returns a response.
+
+---
+
+# 5. API Gateway Request and Lambda Event
+
+When API Gateway invokes Lambda, Lambda receives an event containing information about the HTTP request.
+
+Conceptually:
+
+```json
+{
+  "requestContext": {},
+  "httpMethod": "POST",
+  "path": "/customers",
+  "headers": {},
+  "queryStringParameters": {},
+  "body": "{...}"
+}
+```
+
+The exact event structure depends on the API type/integration.
+
+Your Python code can extract the information it needs.
+
+For example:
+
+```python
+import json
+
+def lambda_handler(event, context):
+
+    body = json.loads(event["body"])
+
+    name = body["name"]
+
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "message": f"Created customer {name}"
+        })
+    }
+```
+
+---
+
+# 6. Lambda Response
+
+Lambda typically returns something conceptually like:
+
+```json
+{
+  "statusCode": 200,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"message\":\"Success\"}"
+}
+```
+
+API Gateway uses this to construct the HTTP response.
+
+The client receives:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+
+```json
+{
+  "message": "Success"
+}
+```
+
+---
+
+# 7. HTTP Methods
+
+APIs commonly use:
+
+| Method | Typical purpose          |
+| ------ | ------------------------ |
+| GET    | Retrieve data            |
+| POST   | Create/process something |
+| PUT    | Replace/update           |
+| PATCH  | Partially update         |
+| DELETE | Delete                   |
+
+Example:
+
+```text
+GET    /customers
+GET    /customers/123
+POST   /customers
+PUT    /customers/123
+DELETE /customers/123
+```
+
+---
+
+# 8. API Routes
+
+A route combines an HTTP method and path.
+
+For example:
+
+```text
+GET /customers
+```
+
+and:
+
+```text
+POST /customers
+```
+
+are different API operations.
+
+You could route them to different Lambda functions:
+
+```text
+GET /customers
+      |
+      v
+Lambda-GetCustomers
+
+
+POST /customers
+      |
+      v
+Lambda-CreateCustomer
+```
+
+Or use a single Lambda depending on the application design.
+
+---
+
+# 9. Path Parameters
+
+Suppose you have:
+
+```text
+GET /customers/{customerId}
+```
+
+A request:
+
+```text
+GET /customers/123
+```
+
+contains:
+
+```text
+customerId = 123
+```
+
+The Lambda can use that value to retrieve the customer.
+
+Conceptually:
+
+```text
+API Gateway
+     |
+     | customerId = 123
+     v
+Lambda
+     |
+     v
+DynamoDB
+```
+
+---
+
+# 10. Query Parameters
+
+You can also have:
+
+```text
+GET /customers?country=Ireland
+```
+
+Here:
+
+```text
+country = Ireland
+```
+
+is a query parameter.
+
+Typical uses:
+
+```text
+?page=2
+?limit=100
+?country=Ireland
+?status=ACTIVE
+```
+
+---
+
+# 11. Headers
+
+HTTP requests can also contain headers.
+
+For example:
+
+```text
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+API Gateway can use headers for things such as:
+
+* Authentication
+* Content type
+* Correlation IDs
+* Client metadata
+
+---
+
+# 12. Authentication vs Authorization
+
+This is important in interviews.
+
+### Authentication
+
+> **Who are you?**
+
+### Authorization
+
+> **What are you allowed to do?**
+
+For example:
+
+```text
+User logs in
+    ↓
+Identity verified
+    ↓
+Authorization checked
+    ↓
+API request allowed
+```
+
+API Gateway can integrate with different authorization mechanisms, including:
+
+* IAM authorization
+* Amazon Cognito
+* Lambda authorizers
+
+---
+
+# 13. Lambda Authorizer
+
+A Lambda authorizer is a Lambda function that can determine whether an API request should be allowed.
+
+Conceptually:
+
+```text
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Authorizer Lambda
+  |
+  +---- allowed ----> API Lambda
+  |
+  +---- denied
+```
+
+For example:
+
+```text
+Authorization token
+       |
+       v
+Authorizer
+       |
+       v
+Is token valid?
+    /       \
+  Yes        No
+   |          |
+   v          v
+Allow       Deny
+```
+
+---
+
+# 14. API Gateway Throttling
+
+API Gateway can protect your backend from excessive traffic.
+
+Imagine:
+
+```text
+Client traffic
+      |
+      v
+API Gateway
+      |
+   Throttle
+      |
+      v
+Lambda
+```
+
+Without controls, a sudden traffic spike could cause excessive Lambda invocations and put pressure on downstream services.
+
+Throttling helps control request rates.
+
+---
+
+# 15. API Gateway + Lambda + DynamoDB
+
+A very common serverless API is:
+
+```text
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Lambda
+  |
+  v
+DynamoDB
+```
+
+Example:
+
+```text
+GET /files/customer.csv
+```
+
+Lambda might:
+
+1. Read the file metadata from DynamoDB.
+2. Check its status.
+3. Return the result.
+
+Another example:
+
+```text
+POST /files
+```
+
+Lambda might:
+
+1. Validate the request.
+2. Store metadata in DynamoDB.
+3. Generate a presigned S3 URL.
+4. Return the URL to the client.
+
+---
+
+# 16. API Gateway + S3
+
+API Gateway doesn't have to invoke Lambda for every architecture.
+
+It can integrate with other AWS services/backends as appropriate.
+
+For example:
+
+```text
+Client
+  |
+  v
+API Gateway
+  |
+  v
+AWS service/backend
+```
+
+But for a Python serverless application, a very common pattern is:
+
+```text
+API Gateway → Lambda → AWS services
+```
+
+---
+
+# 17. REST API vs HTTP API
+
+API Gateway provides different API offerings.
+
+Two important ones are:
+
+### HTTP API
+
+Generally simpler and lower-cost for many common HTTP API use cases.
+
+Good when you need straightforward:
+
+```text
+HTTP → Lambda/backend
+```
+
+### REST API
+
+Provides a broader set of API management features.
+
+For interviews, remember:
+
+> **HTTP APIs are simpler and optimized for common HTTP use cases, while REST APIs provide more advanced API-management capabilities.**
+
+Don't automatically assume REST API is always better.
+
+---
+
+# 18. Stages
+
+API Gateway can have different stages.
+
+For example:
+
+```text
+dev
+test
+prod
+```
+
+Conceptually:
+
+```text
+API
+ |
+ +---- dev
+ |
+ +---- test
+ |
+ +---- prod
+```
+
+This allows different environments to expose different deployments/configurations.
+
+A common development workflow is:
+
+```text
+Developer
+   ↓
+dev API
+   ↓
+Testing
+   ↓
+prod deployment
+```
+
+---
+
+# 19. CORS
+
+**CORS = Cross-Origin Resource Sharing.**
+
+Suppose your frontend runs on:
+
+```text
+https://frontend.example.com
+```
+
+and your API runs on:
+
+```text
+https://api.example.com
+```
+
+The browser considers these different origins.
+
+The API needs appropriate CORS configuration to allow the browser to make the request.
+
+Conceptually:
+
+```text
+Browser
+   |
+   | Cross-origin request
+   v
+API Gateway
+   |
+   v
+Backend
+```
+
+This is primarily a browser security concern.
+
+---
+
+# 20. API Gateway Logging and Monitoring
+
+API Gateway can provide monitoring information such as:
+
+* Request count
+* Latency
+* Errors
+* 4xx responses
+* 5xx responses
+* Throttling
+
+CloudWatch is commonly used for logs and metrics.
+
+The troubleshooting flow is:
+
+```text
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Lambda
+  |
+  v
+DynamoDB / S3 / other service
+```
+
+Check each layer.
+
+---
+
+# 21. 4xx vs 5xx
+
+A useful interview concept:
+
+### 4xx
+
+Generally indicates a problem with the request/client side.
+
+Examples:
+
+```text
+400 → Bad Request
+401 → Unauthorized
+403 → Forbidden
+404 → Not Found
+429 → Too Many Requests
+```
+
+### 5xx
+
+Generally indicates a server-side/integration/backend problem.
+
+Examples:
+
+```text
+500 → Internal Server Error
+502 → Bad Gateway
+503 → Service Unavailable
+504 → Gateway Timeout
+```
+
+Don't assume every 4xx or 5xx has exactly one cause; investigate the API Gateway and backend logs.
+
+---
+
+# 22. How Would You Troubleshoot a 500 Error?
+
+Interview question:
+
+> "Your API is returning HTTP 500. What do you check?"
+
+Strong answer:
+
+```text
+Client
+  ↓
+API Gateway
+  ↓
+Lambda
+  ↓
+Downstream service
+```
+
+I would:
+
+1. Check API Gateway metrics/logs.
+2. Check whether API Gateway successfully invoked Lambda.
+3. Check Lambda CloudWatch logs.
+4. Look for Python exceptions.
+5. Check Lambda's response format.
+6. Check downstream calls to DynamoDB/S3/etc.
+7. Check IAM permissions if an AWS API call failed.
+8. Check timeouts/throttling.
+9. Reproduce the request with the same input.
+
+This shows you troubleshoot **layer by layer** rather than randomly changing code.
+
+---
+
+# 23. 502 Error
+
+A **502 Bad Gateway** can occur when API Gateway has a problem with the backend integration or receives an invalid response from the integration.
+
+For Lambda integrations, one thing to check is whether Lambda returned the expected response structure.
+
+For example:
+
+```python
+return {
+    "statusCode": 200,
+    "body": json.dumps({"message": "OK"})
+}
+```
+
+rather than returning an incompatible structure.
+
+---
+
+# 24. 504 Timeout
+
+A gateway timeout generally means the integration did not complete within the allowed time.
+
+Troubleshooting:
+
+```text
+API Gateway
+     |
+     v
+Lambda
+     |
+     v
+Database / downstream service
+```
+
+Check:
+
+* Lambda duration
+* Database latency
+* Downstream API latency
+* Network configuration
+* API Gateway timeout/configuration
+* Whether the operation should instead be asynchronous
+
+---
+
+# 25. Synchronous vs Asynchronous API Design
+
+This is very relevant to your ETL project.
+
+Suppose a user uploads a huge CSV and the ETL takes several minutes.
+
+You generally don't want:
+
+```text
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Lambda
+  |
+  v
+Wait several minutes for ETL
+```
+
+A better architecture could be:
+
+```text
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Lambda
+  |
+  +--> Store/request metadata
+  |
+  +--> Start asynchronous workflow
+  |
+  v
+Return quickly
+
+          ↓
+     Step Functions
+          ↓
+       Redshift
+```
+
+The API can return something like:
+
+```json
+{
+  "status": "PROCESSING",
+  "file_id": "12345"
+}
+```
+
+The client can then query:
+
+```text
+GET /files/12345/status
+```
+
+This is a strong example of combining:
+
+**API Gateway + Lambda + DynamoDB + Step Functions**
+
+---
+
+# 26. How API Gateway Fits Your Overall AWS Knowledge
+
+You now have:
+
+```text
+                   API Gateway
+                       |
+                       v
+                    Lambda
+                       |
+          +------------+------------+
+          |            |            |
+          v            v            v
+       DynamoDB       S3          SQS
+                                    |
+                                    v
+                                  Lambda
+                                    |
+                                    v
+                              Step Functions
+                                    |
+                                    v
+                                Redshift
+```
+
+Different entry points can exist.
+
+### API-driven flow
+
+```text
+Client
+ ↓
+API Gateway
+ ↓
+Lambda
+```
+
+### Event-driven ETL flow
+
+```text
+S3
+ ↓
+Lambda
+ ↓
+SQS
+ ↓
+Lambda
+ ↓
+Step Functions
+ ↓
+Redshift
+```
+
+API Gateway is primarily the **HTTP/API entry point**.
+
+---
+
+# 27. API Gateway vs Load Balancer
+
+A common interview comparison:
+
+| API Gateway                               | Load Balancer                            |
+| ----------------------------------------- | ---------------------------------------- |
+| API management                            | Traffic distribution                     |
+| API routes                                | Load balancing                           |
+| Authentication/authorization integrations | Network/application traffic distribution |
+| Throttling                                | Health checks                            |
+| Serverless APIs                           | EC2/ECS/EKS and other backends           |
+| Strong serverless integration             | Common for long-running services         |
+
+Don't think of API Gateway simply as "another load balancer."
+
+Their primary purposes are different.
+
+---
+
+# 28. API Gateway vs SQS
+
+Another useful comparison:
+
+### API Gateway
+
+```text
+Client
+  ↓
+HTTP API
+```
+
+Used to expose an API.
+
+### SQS
+
+```text
+Producer
+  ↓
+Queue
+  ↓
+Consumer
+```
+
+Used to queue work and decouple services.
+
+They can be combined:
+
+```text
+Client
+  ↓
+API Gateway
+  ↓
+Lambda
+  ↓
+SQS
+  ↓
+Worker Lambda
+```
+
+This is useful when an API request should create asynchronous work.
+
+---
+
+# 29. Interview Answer — "What is API Gateway?"
+
+A strong answer:
+
+> "Amazon API Gateway is a managed service for creating and exposing APIs. In a serverless architecture, it commonly acts as the HTTP entry point and integrates with Lambda. It provides routing, authorization, throttling, monitoring and other API-management capabilities."
+
+---
+
+# 30. Interview Answer — "How would you design a serverless API?"
+
+You could answer:
+
+> "I would typically expose the API through API Gateway and integrate it with Lambda for the Python business logic. Lambda could interact with services such as DynamoDB or S3. For long-running operations, I would avoid keeping the API request open and instead trigger an asynchronous workflow such as SQS or Step Functions, then return a job or file ID that the client can use to check status."
+
+---
+
+# 31. Key Things to Remember
+
+```text
+API Gateway
+    ↓
+Expose/manage HTTP APIs
+
+Lambda
+    ↓
+Run Python/business logic
+
+DynamoDB
+    ↓
+Store application metadata/state
+
+S3
+    ↓
+Store objects/files
+
+SQS
+    ↓
+Queue asynchronous work
+
+Step Functions
+    ↓
+Orchestrate workflows
+```
+
+### One-line interview definition
+
+> **API Gateway is the managed HTTP/API front door that routes client requests to backend services such as Lambda while providing capabilities like authorization, throttling, monitoring and API management.**
