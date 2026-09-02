@@ -1,0 +1,946 @@
+# AWS S3 — Simple Storage Service
+
+## 1. What is Amazon S3?
+
+**Amazon S3 (Simple Storage Service)** is AWS's object storage service.
+
+It is commonly used to store:
+
+* CSV files
+* JSON files
+* Images
+* Videos
+* Backups
+* Logs
+* Data lake files
+* ETL input/output files
+
+For our ETL project:
+
+```text
+CSV file
+   ↓
+S3 Ingest Bucket
+   ↓
+Lambda
+```
+
+---
+
+# 2. S3 Basic Structure
+
+S3 has three important concepts:
+
+```text
+S3
+│
+├── Bucket
+│
+└── Object
+      ├── Key
+      └── Data
+```
+
+### Bucket
+
+A bucket is a container for objects.
+
+Example:
+
+```text
+etl-ingest-bucket
+```
+
+### Object
+
+The actual file stored inside S3.
+
+Example:
+
+```text
+customer_20260829.csv
+```
+
+### Object Key
+
+The key identifies the object's location/name inside the bucket.
+
+Example:
+
+```text
+incoming/customer_20260829.csv
+```
+
+---
+
+# 3. Bucket vs Object
+
+Think:
+
+```text
+Bucket = container
+
+Object = file
+
+Key = name/path used to identify the object
+```
+
+Example:
+
+```text
+Bucket:
+company-etl-ingest
+
+Object key:
+incoming/customer_20260829.csv
+```
+
+Together:
+
+```text
+s3://company-etl-ingest/incoming/customer_20260829.csv
+```
+
+---
+
+# 4. S3 Is Object Storage
+
+S3 is not a traditional filesystem or relational database.
+
+You store **objects** inside buckets.
+
+For example:
+
+```text
+S3 Bucket
+│
+├── incoming/
+│   ├── customers.csv
+│   ├── orders.csv
+│   └── transactions.csv
+│
+├── processed/
+│   ├── customers.csv
+│   └── orders.csv
+│
+└── failed/
+    └── invalid_file.csv
+```
+
+The `/` structure is primarily part of the object key naming convention rather than traditional folders.
+
+---
+
+# 5. S3 in Our ETL Project
+
+Our ingestion flow starts with S3:
+
+```text
+CSV file
+   ↓
+S3 Ingest Bucket
+   ↓
+S3 Event Notification
+   ↓
+Lambda 1
+```
+
+The CSV remains in S3.
+
+Lambda does **not** need to carry the entire CSV through SQS.
+
+Instead:
+
+```text
+S3
+ └── incoming/customer_20260829.csv
+
+SQS
+ └── {
+       "file_key": "incoming/customer_20260829.csv"
+     }
+```
+
+This is an important design decision.
+
+---
+
+# 6. S3 Event Notification
+
+S3 can generate an event when something happens to an object.
+
+For example:
+
+```text
+CSV uploaded
+     ↓
+S3
+     ↓
+ObjectCreated event
+     ↓
+Lambda
+```
+
+So when a CSV is uploaded:
+
+```text
+S3
+ ↓
+Event Notification
+ ↓
+Lambda 1
+```
+
+Lambda can then validate the filename.
+
+---
+
+# 7. Example S3 Event
+
+Conceptually, Lambda may receive information such as:
+
+```json
+{
+  "Records": [
+    {
+      "s3": {
+        "bucket": {
+          "name": "company-etl-ingest"
+        },
+        "object": {
+          "key": "incoming/customer_20260829.csv"
+        }
+      }
+    }
+  ]
+}
+```
+
+Lambda can extract:
+
+```python
+bucket = event["Records"][0]["s3"]["bucket"]["name"]
+
+key = event["Records"][0]["s3"]["object"]["key"]
+```
+
+Then:
+
+```text
+bucket = company-etl-ingest
+
+key = incoming/customer_20260829.csv
+```
+
+---
+
+# 8. Filename Validation
+
+In our project, Lambda 1 performs validation.
+
+For example:
+
+```text
+incoming/customer_20260829.csv
+```
+
+Lambda can validate:
+
+* File extension
+* Filename format
+* Expected naming convention
+* Required path/prefix
+* Potential duplicate file
+
+Conceptually:
+
+```text
+S3 upload
+    ↓
+Lambda 1
+    ↓
+Is filename valid?
+   / \
+ Yes  No
+  ↓    ↓
+DynamoDB   Failed handling
+  ↓
+SQS
+```
+
+---
+
+# 9. S3 Prefixes
+
+We can organize objects using prefixes.
+
+Example:
+
+```text
+incoming/
+processed/
+failed/
+archive/
+```
+
+Example keys:
+
+```text
+incoming/customers/customer_20260829.csv
+
+processed/customers/customer_20260829.csv
+
+failed/customers/customer_20260829.csv
+```
+
+Prefixes are useful for organization and for filtering events/lifecycle rules.
+
+---
+
+# 10. S3 Permissions
+
+IAM controls what an application can do with S3.
+
+Common S3 permissions:
+
+```text
+s3:GetObject
+s3:PutObject
+s3:DeleteObject
+s3:ListBucket
+```
+
+Important distinction:
+
+```text
+s3:ListBucket
+→ Permission on the bucket
+
+s3:GetObject
+→ Permission on objects
+```
+
+For example:
+
+```text
+Lambda
+  ↓
+IAM Role
+  ↓
+s3:GetObject
+  ↓
+S3 object
+```
+
+---
+
+# 11. S3 Bucket Policy
+
+S3 also supports **resource-based bucket policies**.
+
+Example conceptually:
+
+```text
+S3 Bucket
+   ↓
+Bucket Policy
+   ↓
+Allow specific principal
+   ↓
+Specific S3 actions
+```
+
+This is different from the Lambda execution role.
+
+You might have:
+
+```text
+Lambda IAM Role
+      ↓
+Identity-based policy
+
+S3 Bucket
+      ↓
+Resource-based bucket policy
+```
+
+Both can participate in authorization.
+
+---
+
+# 12. S3 Encryption
+
+S3 supports encryption at rest.
+
+There are two important concepts to understand for interviews:
+
+### SSE-S3
+
+AWS manages the encryption keys for you.
+
+```text
+S3
+ ↓
+Server-side encryption
+ ↓
+AWS-managed encryption
+```
+
+### SSE-KMS
+
+S3 uses AWS KMS for key management.
+
+```text
+S3
+ ↓
+SSE-KMS
+ ↓
+KMS key
+```
+
+SSE-KMS gives you more control over the key and access policies.
+
+---
+
+# 13. S3 + KMS
+
+Suppose your company requires tighter control over encryption keys.
+
+You could use:
+
+```text
+CSV
+ ↓
+S3
+ ↓
+SSE-KMS
+ ↓
+Customer-managed KMS key
+```
+
+The IAM/KMS permissions must be configured correctly.
+
+For example, an application reading an encrypted object may need:
+
+```text
+s3:GetObject
+```
+
+and, depending on the encryption/key configuration:
+
+```text
+kms:Decrypt
+```
+
+---
+
+# 14. Bucket Versioning
+
+S3 Versioning allows multiple versions of an object to be retained.
+
+Example:
+
+```text
+customer.csv
+    ↓
+Version 1
+
+customer.csv
+    ↓
+Version 2
+
+customer.csv
+    ↓
+Version 3
+```
+
+If someone accidentally overwrites or deletes an object, previous versions can potentially be recovered, subject to lifecycle/retention configuration.
+
+---
+
+# 15. Why Use Versioning?
+
+Useful for:
+
+* Accidental deletion protection
+* Accidental overwrite protection
+* Data recovery
+* Audit/history
+* Important production data
+
+For an ETL bucket, versioning can be useful when files may be replaced or accidentally deleted.
+
+---
+
+# 16. S3 Lifecycle Rules
+
+Lifecycle rules automatically manage objects as they age.
+
+For example:
+
+```text
+Day 0
+ ↓
+S3 Standard
+
+After 30 days
+ ↓
+Infrequent Access
+
+After 90 days
+ ↓
+Archive storage
+
+After 365 days
+ ↓
+Delete
+```
+
+This can reduce storage cost and automate retention.
+
+---
+
+# 17. S3 Storage Classes
+
+Different storage classes are designed for different access patterns.
+
+Common examples:
+
+```text
+S3 Standard
+S3 Intelligent-Tiering
+S3 Standard-IA
+S3 One Zone-IA
+S3 Glacier Instant Retrieval
+S3 Glacier Flexible Retrieval
+S3 Glacier Deep Archive
+```
+
+### Simple understanding
+
+```text
+Frequently accessed
+        ↓
+S3 Standard
+
+Unknown/changing access pattern
+        ↓
+Intelligent-Tiering
+
+Rarely accessed
+        ↓
+IA / Glacier classes
+
+Long-term archive
+        ↓
+Glacier Deep Archive
+```
+
+For interview purposes, don't just memorize names.
+
+Understand the principle:
+
+> Choose the storage class based on access frequency, retrieval requirements, resilience requirements, and cost.
+
+---
+
+# 18. S3 Durability vs Availability
+
+These are different concepts.
+
+### Durability
+
+How likely your data is to remain intact.
+
+### Availability
+
+How available the service/data is for access.
+
+Interview question:
+
+> "Is durability the same as availability?"
+
+Answer:
+
+> No. Durability refers to protecting data from loss or corruption, while availability refers to how accessible the data is when requested.
+
+---
+
+# 19. S3 Presigned URLs
+
+A presigned URL provides temporary access to an S3 object.
+
+Example:
+
+```text
+Application
+   ↓
+Generate presigned URL
+   ↓
+User
+   ↓
+Temporary access to S3 object
+```
+
+The user doesn't necessarily need AWS credentials to access the object through the presigned URL.
+
+Example use case:
+
+```text
+User wants to download report.csv
+        ↓
+Application generates temporary URL
+        ↓
+User downloads from S3
+```
+
+The URL can have an expiration time.
+
+---
+
+# 20. S3 and Large Files
+
+One of the reasons S3 works well for ETL is that it is designed for large-scale object storage.
+
+Instead of doing:
+
+```text
+CSV
+ ↓
+Lambda memory
+ ↓
+SQS message
+ ↓
+Lambda
+```
+
+we do:
+
+```text
+CSV
+ ↓
+S3
+
+SQS
+ ↓
+File key
+
+Lambda
+ ↓
+Retrieve CSV from S3
+```
+
+This keeps the messaging layer lightweight.
+
+---
+
+# 21. S3 and SQS in Our Architecture
+
+This distinction is extremely important for your interview.
+
+```text
+                    S3
+                     │
+                     │
+              Actual CSV file
+                     │
+                     │
+                     ↓
+              Lambda 1
+                     │
+                     │
+              File key only
+                     │
+                     ↓
+                    SQS
+                     │
+                     │
+                     ↓
+              Lambda 2
+                     │
+                     │
+                File key
+                     │
+                     ↓
+                    S3
+                     │
+                     │
+              Read actual CSV
+```
+
+### Remember:
+
+> **S3 stores the data. SQS carries the message describing the work.**
+
+---
+
+# 22. S3 Object Retrieval
+
+Lambda 2 can retrieve the object using boto3.
+
+Example:
+
+```python
+import boto3
+
+s3 = boto3.client("s3")
+
+response = s3.get_object(
+    Bucket="company-etl-ingest",
+    Key="incoming/customer_20260829.csv"
+)
+
+body = response["Body"]
+```
+
+For large files, avoid blindly loading the entire object into Lambda memory.
+
+Depending on the processing requirement, you may stream/read in chunks or use a more suitable data-processing service.
+
+---
+
+# 23. S3 Security Best Practices
+
+Important practices:
+
+### 1. Block public access
+
+Don't make buckets public unless there is a deliberate architectural reason.
+
+### 2. Use IAM
+
+Give applications only the required S3 permissions.
+
+### 3. Enable encryption
+
+Use appropriate server-side encryption.
+
+### 4. Use versioning where appropriate
+
+Protect against accidental deletion/overwrite.
+
+### 5. Use lifecycle rules
+
+Automatically manage old objects.
+
+### 6. Monitor access
+
+Use AWS logging/auditing capabilities where required.
+
+---
+
+# 24. S3 Bucket Naming
+
+S3 bucket names are globally unique.
+
+For example:
+
+```text
+my-company-etl-ingest-dev
+```
+
+Another AWS account cannot normally create a bucket with exactly the same bucket name.
+
+This is why Terraform examples often include an environment or unique suffix:
+
+```text
+my-company-etl-ingest-dev
+my-company-etl-ingest-test
+my-company-etl-ingest-prod
+```
+
+---
+
+# 25. S3 and Environments
+
+A common setup is:
+
+```text
+Development
+    ↓
+etl-ingest-dev
+
+Testing
+    ↓
+etl-ingest-test
+
+Production
+    ↓
+etl-ingest-prod
+```
+
+Terraform can create/manage these resources.
+
+---
+
+# 26. S3 Troubleshooting
+
+Suppose Lambda receives an S3 event but cannot read the file.
+
+Investigate:
+
+```text
+1. Is the bucket correct?
+       ↓
+2. Is the object key correct?
+       ↓
+3. Does the object exist?
+       ↓
+4. Does Lambda have s3:GetObject?
+       ↓
+5. Is there a bucket policy denying access?
+       ↓
+6. Is the object encrypted with KMS?
+       ↓
+7. Does the Lambda have the required KMS permissions?
+```
+
+---
+
+# 27. Common S3 Interview Questions
+
+## Q1. What is S3?
+
+> S3 is AWS object storage used to store and retrieve objects such as files and datasets at scale.
+
+---
+
+## Q2. What is the difference between a bucket and an object?
+
+> A bucket is a container for S3 objects, while an object is the actual stored data along with its metadata and key.
+
+---
+
+## Q3. What is an S3 object key?
+
+> The object key is the unique name used to identify an object within a bucket. For example, `incoming/customer_20260829.csv`.
+
+---
+
+## Q4. How can S3 trigger Lambda?
+
+> S3 can send an object event notification when an event such as an object creation occurs, and Lambda can be configured as the destination.
+
+---
+
+## Q5. How would you secure an S3 bucket?
+
+> I would keep public access blocked, use least-privilege IAM and bucket policies, enable appropriate encryption, use versioning where required, and configure logging/monitoring and lifecycle policies according to the data requirements.
+
+---
+
+## Q6. What is S3 versioning?
+
+> Versioning allows multiple versions of the same object to be retained, helping recover from accidental deletion or overwriting.
+
+---
+
+## Q7. What is an S3 lifecycle rule?
+
+> A lifecycle rule automatically transitions or deletes objects based on conditions such as object age, helping manage retention and storage cost.
+
+---
+
+## Q8. S3 vs SQS?
+
+> S3 is object storage for files and data. SQS is a messaging queue used to decouple producers and consumers and buffer work.
+
+---
+
+# 28. Scenario Question
+
+### Interviewer:
+
+> A CSV file is uploaded to S3. Explain what happens in your ETL architecture.
+
+### Answer:
+
+> When the CSV is uploaded to the S3 ingest bucket, an S3 object-created event triggers the validation Lambda. The Lambda validates the filename and records the file metadata and status in DynamoDB. It then sends the S3 object key to SQS rather than sending the actual CSV file. The processing Lambda consumes the SQS message through an event source mapping, retrieves the CSV from S3 using the object key, and starts the Step Functions ETL workflow.
+
+Architecture:
+
+```text
+CSV
+ ↓
+S3
+ ↓
+S3 Event
+ ↓
+Lambda 1
+ ├── Validate filename
+ ├── DynamoDB
+ └── SQS → file key
+             ↓
+          Lambda 2
+             ↓
+            S3
+             ↓
+        Actual CSV
+             ↓
+       Step Functions
+             ↓
+          Redshift
+```
+
+---
+
+# 29. S3 Mental Model
+
+Remember:
+
+```text
+S3
+│
+├── Bucket
+│
+├── Object
+│     └── Key
+│
+├── Event Notifications
+│
+├── Versioning
+│
+├── Lifecycle
+│
+├── Storage Classes
+│
+├── Encryption
+│     ├── SSE-S3
+│     └── SSE-KMS
+│
+├── Bucket Policies
+│
+└── Presigned URLs
+```
+
+And for your project:
+
+```text
+S3
+ ↓
+Actual CSV
+
+DynamoDB
+ ↓
+File metadata/status
+
+SQS
+ ↓
+File key / processing message
+
+Lambda
+ ↓
+Validation + processing
+
+Step Functions
+ ↓
+ETL orchestration
+
+Redshift
+ ↓
+Warehouse
+```
+
+# 30. One-Line Interview Summary
+
+> **S3 is our durable object-storage layer; in our ETL pipeline it stores the actual CSV files, generates an event when a file arrives, and allows downstream Lambda processing to retrieve the file using its object key.**
