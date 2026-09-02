@@ -1,0 +1,1035 @@
+# AWS SQS — Simple Queue Service
+
+## 1. What is Amazon SQS?
+**Amazon SQS (Simple Queue Service)** is a managed messaging service used to **decouple applications**.
+The basic model is:
+
+```text id="n8y3wf"
+Producer
+   ↓
+SQS Queue
+   ↓
+Consumer
+```
+The producer sends a message to the queue.
+The consumer reads and processes the message.
+---
+
+# 2. Why Do We Need SQS?
+Imagine our S3 ingestion process receives 10,000 files.
+
+Without a queue:
+```text id="zj8tq2"
+S3
+ ↓
+Lambda
+ ↓
+Process everything immediately
+```
+The processing layer could become overloaded.
+
+With SQS:
+```text id="p0h1qz"
+S3
+ ↓
+Lambda 1
+ ↓
+SQS
+ ↓
+Lambda 2
+```
+
+SQS acts as a **buffer**.
+If Lambda 2 can process only 100 messages at a time, the remaining messages can wait in SQS.
+
+```text id="x7m3ka"
+SQS
+├── Message 1
+├── Message 2
+├── Message 3
+├── ...
+└── Message 10,000
+```
+
+---
+
+# 3. SQS in Our ETL Architecture
+Our architecture is:
+
+```text id="wq3m4n"
+CSV
+ ↓
+S3
+ ↓
+S3 Event
+ ↓
+Lambda 1
+ ├── Validate filename
+ ├── Update DynamoDB
+ └── Send file key
+        ↓
+       SQS
+        ↓
+Lambda Event Source Mapping
+        ↓
+Lambda 2
+        ↓
+Step Functions
+        ↓
+Redshift
+```
+The important point:
+
+> **SQS carries the processing message, not the actual CSV file.**
+
+---
+
+# 4. What Does Our SQS Message Contain?
+Example:
+```json id="xj6z8k"
+{
+    "file_key": "incoming/customer_20260829.csv"
+}
+```
+The actual CSV remains in:
+```text id="7u2m3f"
+S3
+ ↓
+incoming/customer_20260829.csv
+```
+So:
+```text id="3k9w4b"
+S3
+→ Actual data
+
+SQS
+→ Message describing the work
+```
+
+---
+
+# 5. Producer and Consumer
+### Producer
+The component that sends messages.
+In our project:
+
+```text id="x4f1kq"
+Lambda 1
+   ↓
+SQS SendMessage
+```
+### Consumer
+The component that processes messages.
+In our project:
+
+```text id="p8n2vd"
+SQS
+   ↓
+Lambda 2
+```
+---
+
+# 6. How Lambda Consumes SQS
+We configure an **Event Source Mapping** between SQS and Lambda.
+
+```text id="c3q7jw"
+SQS Queue
+    ↓
+Event Source Mapping
+    ↓
+Lambda 2
+```
+AWS Lambda manages the polling of SQS.
+We do **not** normally write:
+```python id="r4n8cv"
+sqs.receive_message()
+```
+
+inside Lambda 2 for this architecture.
+Instead, AWS polls the queue and invokes Lambda.
+---
+
+# 7. SQS Polling
+Conceptually:
+
+```text id="5u8j2x"
+             AWS Lambda Service
+                    │
+                    │ Poll
+                    ↓
+                  SQS
+                    │
+                    │ Messages
+                    ↓
+                  Lambda
+```
+This is an AWS-managed integration.
+Your application code focuses on processing the message.
+---
+
+# 8. SQS Message Lifecycle
+A simplified lifecycle is:
+
+```text id="q9f3ya"
+Message sent
+     ↓
+Message available
+     ↓
+Lambda receives message
+     ↓
+Visibility timeout
+     ↓
+Lambda processes message
+     ↓
+Success?
+   /    \
+ Yes     No
+  ↓       ↓
+Delete   Retry
+message
+```
+---
+
+# 9. Visibility Timeout
+This is one of the most important SQS concepts.
+When a consumer receives a message, SQS temporarily hides it from other consumers.
+This period is called the **visibility timeout**.
+
+Example:
+```text id="a8x5mr"
+SQS
+ ↓
+Message received by Lambda
+ ↓
+Message temporarily invisible
+ ↓
+Lambda processing
+```
+If Lambda successfully processes the message:
+
+```text id="p5n8dw"
+Processing successful
+        ↓
+Message deleted
+```
+
+If Lambda fails:
+
+```text id="b7c2mx"
+Processing fails
+        ↓
+Visibility timeout expires
+        ↓
+Message becomes visible again
+        ↓
+Retry
+```
+---
+
+# 10. Why Visibility Timeout Exists
+Imagine two Lambda executions receive the same message at exactly the same time.
+Without visibility timeout:
+
+```text id="2d6v4p"
+Lambda A ← Message
+Lambda B ← Same Message
+```
+
+Both might process it.
+With visibility timeout:
+
+```text id="h8k1qs"
+Lambda A ← Message
+
+Message becomes temporarily invisible
+Lambda B
+   ↓
+Cannot see that message during visibility period
+```
+This reduces duplicate concurrent processing.
+### Important
+Visibility timeout **does not guarantee exactly-once processing**.
+Duplicates can still occur in distributed systems.
+That's why application-level **idempotency** is important.
+---
+
+# 11. SQS Message Deletion
+A message is normally removed after successful processing.
+With Lambda event source mapping, AWS handles the acknowledgement/deletion behavior after successful processing.
+Conceptually:
+
+```text id="e3v8kx"
+SQS
+ ↓
+Lambda
+ ↓
+Successful processing
+ ↓
+Message deleted
+```
+If processing fails:
+
+```text id="z5t7pc"
+SQS
+ ↓
+Lambda
+ ↓
+Failure
+ ↓
+Message remains / becomes visible again
+ ↓
+Retry
+```
+
+---
+
+# 12. Retry Behavior
+Suppose Lambda fails:
+```text id="2k5j8a"
+Message
+ ↓
+Lambda
+ ↓
+FAIL
+```
+After the visibility timeout:
+```text id="z0p4rw"
+Message visible
+ ↓
+Lambda retries
+```
+This can happen multiple times.
+This is why Lambda consumers should be **idempotent**.
+
+---
+
+# 13. Dead Letter Queue
+A **Dead Letter Queue (DLQ)** is used for messages that repeatedly fail processing.
+Example:
+```text id="c7m5pv"
+Main Queue
+    ↓
+Lambda
+    ↓
+Failure
+    ↓
+Retry
+    ↓
+Retry
+    ↓
+Retry
+    ↓
+Maximum receive count
+    ↓
+DLQ
+```
+The DLQ allows engineers to investigate problematic messages without them continuously blocking normal processing.
+---
+
+# 14. Example DLQ Scenario
+
+Suppose:
+```text id="8p3w6y"
+file_key =
+incoming/broken_customer_file.csv
+```
+Lambda repeatedly fails because the file is malformed.
+Instead of retrying forever:
+```text id="7k1q9x"
+Main Queue
+      ↓
+Repeated failure
+      ↓
+DLQ
+```
+Now the team can investigate the file.
+---
+
+# 15. Why DLQ Is Important
+
+Without a DLQ:
+```text id="j9d3z2"
+Bad message
+   ↓
+Retry
+   ↓
+Retry
+   ↓
+Retry
+   ↓
+Retry...
+```
+
+With a DLQ:
+```text id="w2x8ka"
+Bad message
+   ↓
+Configured retries
+   ↓
+DLQ
+```
+
+This improves operational visibility.
+---
+# 16. Standard SQS Queue
+There are two main SQS queue types:
+
+```text id="e6q1zc"
+Standard
+FIFO
+```
+The **Standard queue** is designed for very high scalability and provides at-least-once message delivery.
+That means duplicate delivery is possible.
+Therefore:
+> Consumers should be designed to handle duplicate messages safely.
+---
+
+# 17. FIFO Queue
+FIFO means:
+> **First In, First Out**
+FIFO queues provide stronger ordering guarantees and support deduplication features.
+They are useful when ordering is important.
+
+Example:
+```text id="z8k4yw"
+Message 1
+Message 2
+Message 3
+
+Expected processing:
+
+1 → 2 → 3
+```
+
+Use FIFO when the application genuinely requires ordered processing.
+
+---
+
+# 18. Standard vs FIFO
+
+| Feature            | Standard                | FIFO                                |
+| ------------------ | ----------------------- | ----------------------------------- |
+| Ordering           | Best effort             | Ordered                             |
+| Duplicate delivery | Possible                | Deduplication support               |
+| Scalability        | Very high               | High, with FIFO-specific limits     |
+| Use case           | General async workloads | Ordering/deduplication requirements |
+
+### Interview answer
+
+> "I would use Standard SQS when extremely high scalability and loose ordering are acceptable. I would use FIFO when message ordering and deduplication are important business requirements."
+
+---
+
+# 19. SQS Batch Processing
+Lambda can process multiple SQS messages in one invocation.
+
+Example:
+```text id="1r4w6n"
+SQS
+├── Message 1
+├── Message 2
+├── Message 3
+├── Message 4
+└── Message 5
+       ↓
+Lambda invocation
+       ↓
+Process batch
+```
+This can improve efficiency compared with invoking Lambda separately for every message.
+The batch size should be chosen based on:
+* Processing time
+* Message size
+* Failure behavior
+* Downstream capacity
+---
+
+# 20. Partial Batch Failure
+Suppose Lambda receives:
+```text id="5y3p9s"
+Message 1 → SUCCESS
+Message 2 → SUCCESS
+Message 3 → FAILURE
+Message 4 → SUCCESS
+Message 5 → SUCCESS
+```
+Without partial batch handling, depending on the configuration, the entire batch can be retried.
+That means successful messages could be processed again.
+With **partial batch response**, the consumer can report which messages failed, allowing successful messages to be removed while failed ones are retried.
+This can significantly reduce unnecessary duplicate processing.
+---
+
+# 21. SQS and Idempotency
+Even with:
+* Visibility timeout
+* FIFO
+* Deduplication
+* Partial batch response
+
+you should still design important consumers to be idempotent.
+Our architecture can use the file key as an idempotency identifier.
+
+Example:
+```text id="3m7q8v"
+file_key =
+incoming/customer_20260829.csv
+```
+Processing:
+
+```text id="6h9p4k"
+Lambda 2
+   ↓
+DynamoDB
+   ↓
+Has this file already been claimed/processed?
+   ↓
+Yes → Don't duplicate the side effect
+No  → Claim it and process
+```
+
+---
+
+# 22. SQS + DynamoDB
+
+This gives us a useful combination:
+
+```text id="h2q9cw"
+SQS
+ ↓
+"Here is work to do"
+
+DynamoDB
+ ↓
+"Here is the state of that work"
+```
+
+For our ETL:
+
+```text id="p5s6x8"
+SQS
+→ file_key
+
+DynamoDB
+→ file_key
+→ status
+→ timestamps
+→ processing metadata
+```
+---
+# 23. Important Failure Scenario
+
+Consider:
+```text id="x8v2k4"
+SQS
+ ↓
+Lambda 2
+ ↓
+Start Step Functions
+ ↓
+Step Functions successfully starts
+ ↓
+Lambda crashes before successful completion
+```
+What happens?
+The SQS message may become visible again and Lambda may process it again.
+Then:
+
+```text id="j6q9mw"
+First attempt
+ ↓
+Start Step Functions execution
+
+Second attempt
+ ↓
+Start Step Functions execution again
+```
+
+Potentially two ETL executions could run.
+This is why we need idempotency.
+---
+
+# 24. Preventing Duplicate Step Functions Execution
+We could use DynamoDB to atomically claim the file:
+
+```text id="a0r7xm"
+file_key = customer_20260829.csv
+status = PROCESSING
+```
+
+Before starting the workflow:
+
+```text id="8q3j1v"
+Conditional write
+       ↓
+Successfully claimed?
+    /       \
+  Yes        No
+   ↓          ↓
+Start       Duplicate
+workflow    / existing
+```
+
+A production design should also handle stale `PROCESSING` states and recovery.
+
+---
+# 25. SQS Decoupling
+
+One of the biggest benefits of SQS is **decoupling**.
+Without SQS:
+```text id="c5j8va"
+Producer
+   ↓
+Consumer
+```
+Producer and consumer are tightly connected.
+With SQS:
+
+```text id="m8r2pd"
+Producer
+   ↓
+SQS
+   ↓
+Consumer
+```
+
+Now:
+
+* Producer can continue producing
+* Consumer can process at its own rate
+* Queue buffers temporary spikes
+* Components can scale independently
+
+---
+
+# 26. SQS and Traffic Spikes
+
+Suppose normally:
+
+```text id="x2c8mv"
+100 messages/minute
+```
+
+Suddenly:
+
+```text id="y7h4ka"
+10,000 messages/minute
+```
+
+The consumer may not immediately process all 10,000.
+
+SQS absorbs the spike:
+
+```text id="s8p3qx"
+Producer
+   ↓
+SQS
+ ┌──────────────────┐
+ │ 10,000 messages  │
+ └──────────────────┘
+   ↓
+Lambda consumers
+```
+
+Lambda can scale consumption according to concurrency and event-source configuration, while the queue provides buffering.
+
+---
+
+# 27. SQS Backlog
+
+A growing queue backlog means:
+
+```text id="q4v8nm"
+Messages arriving
+      >
+Messages being processed
+```
+
+Example:
+
+```text id="n5x1rc"
+Incoming: 1,000/minute
+Processing: 500/minute
+
+Backlog grows
+```
+
+CloudWatch can be used to monitor queue metrics such as:
+
+* Approximate number of visible messages
+* Age of the oldest message
+* Messages sent
+* Messages received
+* Messages deleted
+
+---
+
+# 28. Troubleshooting Growing SQS Backlog
+
+Suppose:
+
+```text id="r8c3wm"
+Queue backlog:
+100
+ ↓
+1,000
+ ↓
+10,000
+ ↓
+100,000
+```
+
+Investigate:
+
+```text id="w5n2pk"
+SQS
+ ↓
+Is backlog growing?
+ ↓
+Lambda
+ ├── Errors?
+ ├── Duration?
+ ├── Throttles?
+ └── Concurrency?
+ ↓
+Downstream systems
+ ├── DynamoDB?
+ ├── Step Functions?
+ ├── Redshift?
+ └── External API?
+```
+
+Possible causes:
+
+* Lambda concurrency limit
+* Reserved concurrency too low
+* Lambda errors
+* Long processing duration
+* Downstream service bottleneck
+* Visibility timeout problems
+* Sudden traffic spike
+
+---
+
+# 29. SQS Visibility Timeout and Lambda Timeout
+
+These settings should be considered together.
+
+Suppose:
+
+```text id="3g6m9w"
+Lambda timeout = 5 minutes
+
+SQS visibility timeout = 1 minute
+```
+
+This can be problematic.
+
+The Lambda could still be processing while the message becomes visible again.
+
+Potentially:
+
+```text id="k2r7pv"
+Lambda A
+  ↓
+Still processing
+
+Visibility timeout expires
+  ↓
+Message becomes visible
+
+Lambda B
+  ↓
+Receives same message
+```
+
+Therefore, the visibility timeout should generally be configured appropriately relative to the expected processing duration, with retries and failure handling considered.
+
+---
+
+# 30. SQS Security
+
+SQS access is controlled using IAM and queue policies.
+
+Examples:
+
+```text id="d8k3wy"
+Lambda 1
+   ↓
+sqs:SendMessage
+   ↓
+Queue
+```
+
+For a consumer:
+
+```text id="p9v4ks"
+Lambda/Event Source Mapping
+   ↓
+Required SQS receive/delete permissions
+```
+
+Use least privilege.
+
+---
+
+# 31. SQS Encryption
+
+SQS supports encryption at rest.
+
+A queue can use:
+
+* SQS-managed encryption
+* AWS KMS-based encryption
+
+Conceptually:
+
+```text id="g5x2rz"
+Message
+   ↓
+SQS
+   ↓
+Encrypted at rest
+   ↓
+KMS (when KMS-based encryption is configured)
+```
+
+This protects message data while stored in the queue.
+
+---
+
+# 32. SQS vs SNS
+
+This is a very common interview question.
+
+### SQS
+
+```text id="s8q3jp"
+Producer
+   ↓
+Queue
+   ↓
+Consumer
+```
+
+Purpose:
+
+* Buffering
+* Asynchronous processing
+* Decoupling
+* Retry
+* Work distribution
+
+### SNS
+
+```text id="k6r2xy"
+Publisher
+   ↓
+SNS Topic
+ ├── Subscriber A
+ ├── Subscriber B
+ └── Subscriber C
+```
+
+Purpose:
+
+* Pub/sub
+* Fan-out
+* Notifications
+
+### Easy memory
+
+```text id="m7x5cq"
+SQS
+→ "I need someone to process this work."
+
+SNS
+→ "Something happened; notify multiple subscribers."
+```
+
+---
+
+# 33. SNS + SQS Fan-Out
+
+A common architecture is:
+
+```text id="y8p2fm"
+                SNS Topic
+                /       \
+               /         \
+             SQS A      SQS B
+               ↓          ↓
+           Lambda A    Lambda B
+```
+
+One event can be delivered to multiple independent processing pipelines.
+
+For example:
+
+```text id="j4v6ka"
+Order completed
+      ↓
+   SNS Topic
+    /     \
+   ↓       ↓
+SQS       SQS
+ ↓         ↓
+Billing   Analytics
+```
+
+---
+
+# 34. SQS vs EventBridge
+
+Another important distinction:
+
+### SQS
+
+Best when you need:
+
+```text id="b2q8dn"
+Queue
+Buffer
+Retry
+Consumer control
+```
+
+### EventBridge
+
+Best when you need:
+
+```text id="v6m3rx"
+Event
+ ↓
+Rule
+ ↓
+Route to target
+```
+
+Simple memory:
+
+```text id="x9f2ka"
+SQS
+→ Queue work
+
+EventBridge
+→ Route events
+```
+---
+
+# 35. Common SQS Interview Questions
+
+## Q1. Why use SQS?
+> SQS provides asynchronous communication and decouples producers from consumers. It also provides buffering and retry capabilities, which helps absorb traffic spikes and improve resilience.
+## Q2. What is visibility timeout?
+> Visibility timeout is the period during which a received SQS message is hidden from other consumers while it is being processed.
+## Q3. What happens if Lambda fails while processing an SQS message?
+> The message is not successfully acknowledged/deleted. After the visibility timeout it can become visible again and be retried. After repeated failures, it can be moved to a configured DLQ.
+## Q4. What is a DLQ?
+> A Dead Letter Queue stores messages that repeatedly fail processing so they can be investigated or handled separately.
+## Q5. Standard vs FIFO?
+> Standard queues provide very high scalability but can deliver duplicates and don't guarantee strict ordering. FIFO queues provide ordering and deduplication capabilities when those requirements are important.
+## Q6. Does Lambda poll SQS?
+> The Lambda event source mapping manages polling of SQS on the application's behalf. We don't normally implement the SQS polling loop ourselves.
+## Q7. Why put the file key in SQS instead of the CSV?
+> S3 is the appropriate service for storing the actual CSV. SQS is used for lightweight messaging and work coordination. The message contains the S3 object key so the consumer can retrieve the actual file when required.
+# 36. Scenario Interview Question
+### Interviewer:
+> Your SQS queue suddenly has 100,000 messages. What would you check?
+### Strong answer:
+> "First I would check the queue metrics, especially message backlog and age of the oldest message. Then I would check the Lambda consumer's errors, duration, throttling and concurrency. I would verify whether reserved or account concurrency is limiting consumption. Finally, I would check downstream dependencies such as DynamoDB, Step Functions or Redshift because the consumer may be healthy but blocked by a downstream bottleneck."
+---
+# 37. Your Complete SQS Flow
+
+```text id="q2w6nc"
+CSV uploaded
+     ↓
+S3
+     ↓
+S3 Event
+     ↓
+Lambda 1
+     │
+     ├── Validate filename
+     │
+     ├── Update DynamoDB
+     │
+     └── SendMessage
+             ↓
+           SQS
+             │
+             │ AWS-managed polling
+             ↓
+     Event Source Mapping
+             ↓
+         Lambda 2
+             │
+             ├── Read file_key
+             │
+             ├── Check DynamoDB
+             │
+             ├── Read CSV from S3
+             │
+             └── Start Step Functions
+                         ↓
+                      Redshift
+```
+
+---
+
+# 38. SQS Mental Model
+
+Remember:
+
+```text id="a9f5mx"
+SQS
+│
+├── Producer
+│
+├── Queue
+│
+├── Consumer
+│
+├── Message
+│
+├── Visibility Timeout
+│
+├── Retry
+│
+├── DLQ
+│
+├── Standard Queue
+│
+├── FIFO Queue
+│
+├── Batch Processing
+│
+├── Partial Batch Failure
+│
+├── Encryption
+│
+└── Lambda Event Source Mapping
+```
+
+---
+
+# 39. Most Important SQS Rules
+
+```text id="r3k8qp"
+1. SQS decouples producers and consumers.
+2. SQS provides buffering for traffic spikes.
+3. Our SQS message contains the S3 file key, not the CSV.
+4. Lambda consumes SQS through Event Source Mapping.
+5. AWS manages the polling.
+6. Visibility timeout temporarily hides a received message.
+7. Failed messages can become visible again and retry.
+8. DLQ handles repeatedly failing messages.
+9. Standard queues can deliver duplicates.
+10. Design consumers to be idempotent.
+11. FIFO is used when ordering/deduplication requirements matter.
+12. Monitor backlog and oldest-message age.
+13. A growing backlog can indicate Lambda throttling,
+    errors, slow processing, or downstream bottlenecks.
+```
+# 40. One-Line Interview Summary
+
+> **SQS is a managed, durable messaging service that decouples producers and consumers. In my ETL pipeline, Lambda 1 puts the S3 file key into SQS, and Lambda 2 consumes the message through an AWS-managed event source mapping, retrieves the actual CSV from S3, and starts the Step Functions workflow.**
