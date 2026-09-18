@@ -1,3 +1,5 @@
+Keeping data and methods together inside a class and controlling access to internal data.
+
 class BankAccount:
     def __init__(self, balance):
         self.__balance = balance  # private attribute
