@@ -1,4 +1,18 @@
 class Animal:
+    def speak(self):
+        print("Animal speaks")
+
+
+class Dog(Animal):
+    pass
+
+
+dog = Dog()
+dog.speak()
+
+
+
+class Animal:
     def __init__(self, name):
         self.name = name
 
