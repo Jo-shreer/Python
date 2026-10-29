@@ -1,0 +1,1091 @@
+# AWS API GATEWAY — COMPLETE REFERENCE NOTES
+
+## 1. What Is API Gateway?
+
+Amazon API Gateway is a fully managed AWS service used to create, publish, secure, monitor, and manage APIs.
+
+It acts as the front door between clients and backend services.
+
+Typical request flow:
+
+Client → API Gateway → Lambda / HTTP backend / AWS service → Response to client
+
+Example architecture:
+
+Mobile app → API Gateway → Lambda → DynamoDB
+
+Another example:
+
+Internet client → API Gateway → VPC Link → Internal Load Balancer → ECS application in private subnets
+
+API Gateway handles API routing, authorization, throttling, request/response processing, and monitoring. It does not automatically provide the backend business logic or database.
+
+Official documentation:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/welcome.html
+
+## 2. API Gateway API Types
+
+There are three main API types.
+
+### A. HTTP API
+
+Purpose:
+- Expose Lambda functions or HTTP backends.
+- Build REST-style APIs with lower cost and less configuration.
+- Support OAuth 2.0 and OpenID Connect authorization.
+- Provide built-in CORS support.
+- Support automatic deployments.
+
+Typical use:
+- Mobile and web application backends.
+- Serverless applications.
+- Standard request/response APIs.
+
+Limitations:
+- Does not provide every feature available in REST APIs.
+- API keys and usage plans are not supported in the same way as REST APIs.
+- Advanced API management requirements may require REST API.
+
+Recommended when standard API functionality is sufficient.
+
+### B. REST API
+
+Purpose:
+- Build APIs requiring more advanced API management capabilities.
+- Support API keys and usage plans.
+- Support request validation and configurable request/response transformations.
+- Support resource policies, private API endpoints, and additional API management features.
+- Support execution logging and more detailed configuration.
+
+Typical use:
+- Enterprise APIs.
+- APIs with complex authorization or transformation requirements.
+- APIs requiring API Gateway usage plans or private REST API endpoints.
+
+Limitations:
+- More configuration complexity.
+- Usually more expensive than HTTP APIs for comparable request volumes.
+- Features and endpoint behavior differ from HTTP APIs.
+
+Recommended when you need a feature that HTTP APIs do not provide.
+
+### C. WebSocket API
+
+Purpose:
+- Maintain persistent, bidirectional client/server connections.
+- Allow servers to send messages to connected clients without waiting for another client request.
+
+Typical use:
+- Chat applications.
+- Real-time dashboards.
+- Live notifications.
+- Collaborative applications.
+
+Important components:
+- `$connect`: Handles a new connection.
+- `$disconnect`: Handles a disconnection.
+- `$default`: Handles messages that do not match another route.
+- Custom routes: Route messages based on message content.
+- Connection ID: Identifies an active connection.
+- `@connections` API: Used to send messages to connected clients.
+
+Important exception:
+WebSocket APIs are stateful at the connection level, but application connection state must be managed separately if required. Connections can disconnect, and clients may need to reconnect.
+
+Official documentation:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html
+https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-rest-api.html
+https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html
+
+## 3. API Gateway and VPC Placement
+
+API Gateway is an AWS-managed service. You do not deploy the API Gateway service itself into your own VPC subnets like an EC2 instance.
+
+However, API Gateway can interact with resources inside a VPC.
+
+### Public API with a VPC backend
+
+Client → Public API Gateway endpoint → VPC Link → Internal ALB/NLB → ECS or other private backend
+
+The API is publicly reachable unless you apply access controls. The backend can remain private.
+
+### Private REST API
+
+Client in VPC → Interface VPC endpoint → Private API Gateway REST API
+
+A private REST API is accessible through an interface VPC endpoint powered by AWS PrivateLink.
+
+Private API access can also be provided from connected networks, such as on-premises networks connected through Direct Connect or VPN, when routing and DNS are configured appropriately.
+
+Important:
+- Private API endpoint type is a REST API feature.
+- Do not confuse a private API endpoint with a private integration.
+- A private API controls how clients reach API Gateway.
+- A private integration controls how API Gateway reaches a backend in a VPC.
+
+### Private integration
+
+API Gateway → VPC Link → Private load balancer or supported private resource
+
+VPC Link V2 supports private integrations for HTTP APIs and REST APIs. Supported targets include Application Load Balancers, Network Load Balancers, and supported AWS Cloud Map resources, depending on API type and configuration.
+
+Important:
+- The VPC Link is used for the backend connection, not as a replacement for the API's client-facing endpoint.
+- Security groups and routing must allow the backend traffic.
+- VPC Link V2 creates and manages network interfaces in your account.
+- An unused VPC Link V2 can become inactive after an extended period without traffic, requiring network interfaces to be reprovisioned when traffic resumes.
+- Private integrations do not automatically make the public API endpoint private.
+- Verify current API-type and target compatibility before designing the integration.
+
+Official documentation:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-private-apis.html
+https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-vpc-links-v2.html
+
+## 4. API Gateway Core Components
+
+### API
+
+The API is the logical application interface exposed to clients.
+
+Important attributes:
+- API ID.
+- API name.
+- API type.
+- Description.
+- Protocol type, where applicable.
+- API endpoint configuration.
+- Tags.
+- Version and deployment configuration.
+
+### Resource — REST API
+
+A resource represents a path in the API.
+
+Example:
+- `/users`
+- `/users/{userId}`
+- `/orders`
+- `/orders/{orderId}`
+
+### Route — HTTP API or WebSocket API
+
+A route determines which backend operation handles a request or message.
+
+HTTP API examples:
+- `GET /users`
+- `POST /users`
+- `GET /users/{userId}`
+- `DELETE /users/{userId}`
+
+WebSocket route examples:
+- `$connect`
+- `$disconnect`
+- `sendMessage`
+
+### Method — REST API
+
+A method defines the HTTP operation available on a resource.
+
+Common methods:
+- GET: Retrieve data.
+- POST: Create or submit data.
+- PUT: Replace a resource.
+- PATCH: Partially update a resource.
+- DELETE: Delete a resource.
+- OPTIONS: Often used for CORS preflight requests.
+
+### Integration
+
+An integration connects the route or method to its backend.
+
+Common backend targets:
+- AWS Lambda.
+- HTTP or HTTPS endpoint.
+- Private HTTP backend through a VPC Link.
+- Supported AWS services through service integrations.
+
+### Deployment
+
+A deployment is a snapshot of an API configuration.
+
+For a REST API, changes generally require a new deployment to become active on the stage. HTTP APIs can use automatic deployments if enabled.
+
+### Stage
+
+A stage is a named deployment environment.
+
+Examples:
+- `dev`
+- `test`
+- `staging`
+- `prod`
+- `$default`
+
+Stages can have their own settings, such as logging, throttling, variables, and deployment configuration, depending on API type.
+
+### Custom domain
+
+A custom domain provides a friendly hostname such as:
+
+`api.example.com`
+
+It can use:
+- An ACM certificate.
+- A DNS record.
+- API mappings to APIs and stages.
+- Regional or edge-optimized configuration where supported.
+
+## 5. API Endpoint Types
+
+For REST APIs, the main endpoint types are:
+
+### Regional
+- Served from the API's AWS Region.
+- Suitable for clients concentrated in a Region.
+- Can be combined with your own CloudFront distribution when required.
+
+### Edge-optimized
+- Uses an AWS-managed CloudFront distribution.
+- Can benefit geographically distributed clients.
+- Primarily a REST API endpoint option.
+
+### Private
+- Accessible through an interface VPC endpoint.
+- Used when API access must remain within private network connectivity.
+- Available for REST APIs.
+
+Important:
+Regional and edge-optimized endpoints are not the same as a VPC Link. Endpoint type describes how clients reach a REST API; a VPC Link describes how API Gateway reaches a private backend.
+
+HTTP API endpoint options and custom-domain behavior differ from REST APIs. Check the documentation for the specific API type.
+
+Official documentation:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-api-endpoint-types.html
+
+## 6. Integration Types and Parameters
+
+### Lambda integration
+
+API Gateway invokes a Lambda function.
+
+Common use:
+- Authentication-aware business logic.
+- Data processing.
+- Database operations.
+- Serverless application backends.
+
+Important configuration:
+- Lambda function ARN.
+- Integration type.
+- Invocation permissions.
+- Payload format version where supported.
+- Timeout and error handling.
+- Request and response format.
+
+For HTTP APIs, Lambda integrations commonly use payload format version `1.0` or `2.0`. Select the version that matches your function's expected event structure.
+
+### HTTP integration
+
+API Gateway forwards requests to an HTTP or HTTPS endpoint.
+
+Important configuration:
+- Integration URI.
+- HTTP method.
+- Connection type.
+- Request parameter mapping.
+- Timeout.
+- TLS configuration where applicable.
+- Backend availability and error handling.
+
+Use a public or otherwise routable endpoint for a standard HTTP integration. Use a private integration and VPC Link when connecting to supported private VPC resources.
+
+### AWS service integration
+
+API Gateway can invoke supported AWS service operations directly.
+
+Examples can include supported SQS, SNS, Step Functions, or other service operations, depending on integration support.
+
+This can remove the need for Lambda when the API only needs to submit a message or invoke a supported service operation.
+
+Important configuration:
+- AWS service and Region.
+- Service action or resource path.
+- Integration role and IAM permissions.
+- Request parameter mapping.
+- Request body transformation where applicable.
+- Backend response mapping.
+
+### MOCK integration
+
+A REST API can return a configured response without invoking a backend.
+
+Useful for:
+- API prototyping.
+- Test responses.
+- Simple fixed responses.
+
+### Proxy integrations
+
+A proxy integration forwards most of the request to the backend, which handles more of the application logic.
+
+Common forms:
+- Lambda proxy integration.
+- HTTP proxy integration.
+
+Proxy integrations reduce the need to define detailed request and response mappings, but the backend must handle the expected request format and response structure.
+
+Official documentation:
+https://docs.aws.amazon.com/apigateway/latest/api/API_Integration.html
+
+## 7. Authorization and Authentication
+
+Authentication establishes who the caller is. Authorization determines what the caller is allowed to do.
+
+### IAM authorization
+
+- Uses AWS credentials and signed requests.
+- Suitable for AWS workloads and trusted callers.
+- Authorization is controlled through IAM policies and the API's supported authorization configuration.
+- Commonly uses Signature Version 4.
+
+### JWT authorization
+
+HTTP APIs support JWT authorizers.
+
+Typical use:
+- OAuth 2.0 access tokens.
+- OpenID Connect identity providers.
+
+Common configuration:
+- Issuer URL.
+- Audience values.
+- Identity source, usually an authorization header.
+- Route authorization scope requirements.
+
+JWT validation does not replace application-level authorization. The backend may still need to verify that the caller can access a specific record or operation.
+
+### Cognito user-pool authorization
+
+REST APIs can use Amazon Cognito user pools to authenticate users and validate tokens.
+
+The exact configuration depends on whether the API uses Cognito authorizers or another supported authorization mechanism.
+
+### Lambda authorizer
+
+A Lambda function evaluates the incoming request and returns an authorization decision.
+
+Common inputs:
+- Authorization header.
+- Identity source.
+- Request parameters.
+- Route or method context.
+
+Common outputs depend on API type and authorizer payload format, and can include an allow/deny policy or a simple authorization response.
+
+Use for custom authentication or authorization logic that built-in authorizers cannot meet.
+
+### Resource policies
+
+Resource policies control which principals, accounts, VPC endpoints, or network sources can invoke a supported API.
+
+They are particularly important for private REST APIs and cross-account access.
+
+### API keys and usage plans
+
+REST APIs can use API keys and usage plans to identify consumers and apply usage-plan quotas and throttling.
+
+Important:
+- An API key is not a substitute for user authentication.
+- Do not treat an API key as a secret-grade security boundary by itself.
+- Usage-plan throttles and quotas are best-effort controls, not guaranteed hard cost or security limits.
+- HTTP APIs do not offer the same API-key and usage-plan feature set as REST APIs.
+
+### Other security controls
+
+Depending on API type and architecture:
+- AWS WAF.
+- TLS and custom domains.
+- Resource policies.
+- IAM policies.
+- JWT authorizers.
+- Lambda authorizers.
+- Private endpoints.
+- VPC endpoint policies.
+- Backend authorization.
+- AWS Organizations controls where applicable.
+
+## 8. Request and Response Configuration
+
+### Request parameters
+
+Possible inputs include:
+- Path parameters.
+- Query-string parameters.
+- Headers.
+- Request body.
+- Authorization information.
+- Context values.
+
+Example:
+`GET /users/123?include=orders`
+
+Here:
+- `123` is a path parameter.
+- `include=orders` is a query parameter.
+
+### Request validation
+
+REST APIs can validate supported request parameters and request bodies against configured models.
+
+Typical validation:
+- Required path or query parameters.
+- Required headers.
+- Request body structure.
+
+HTTP API validation and transformation features differ from REST APIs. Application-level validation is still important.
+
+### Models and schemas
+
+REST API models can describe expected request or response bodies using supported JSON Schema features.
+
+Models can be used for validation and documentation.
+
+### Mapping templates
+
+REST APIs can use Velocity Template Language (VTL) mapping templates to transform requests and responses.
+
+Useful for:
+- Changing JSON structures.
+- Mapping client parameters to backend fields.
+- Integrating with AWS service APIs.
+- Formatting backend responses.
+
+### Parameter mapping
+
+HTTP APIs support parameter mapping for supported request and response transformations.
+
+Mapping can be used to:
+- Add, remove, or modify headers.
+- Transform query parameters.
+- Override supported path or request values.
+
+Do not assume every REST API mapping feature is available in HTTP APIs.
+
+### Response configuration
+
+Consider:
+- HTTP status codes.
+- Response headers.
+- JSON body format.
+- Error response format.
+- CORS headers.
+- Cache behavior where supported.
+- Backend error translation.
+
+### Binary payloads
+
+Binary data support and content handling depend on API type and configuration. REST APIs have explicit binary media type settings; HTTP APIs use different behavior.
+
+Test file uploads, downloads, content types, and encoding with the actual client and integration.
+
+## 9. CORS
+
+Cross-Origin Resource Sharing (CORS) controls which browser origins can access an API.
+
+Common configuration:
+- Allowed origins.
+- Allowed methods.
+- Allowed headers.
+- Exposed headers.
+- Whether credentials are allowed.
+- Preflight response behavior.
+- Maximum age for preflight caching.
+
+Important:
+- CORS is a browser-enforced policy, not authentication.
+- Non-browser clients are not restricted by browser CORS enforcement.
+- When credentials are allowed, do not use a wildcard origin as though it were a specific trusted origin.
+- Ensure backend and API Gateway CORS responses do not conflict.
+- HTTP APIs have built-in CORS configuration.
+- REST APIs may require OPTIONS handling and suitable responses for preflight requests.
+
+## 10. Stages, Deployments, and Versions
+
+### Stage configuration
+
+Possible stage settings include:
+- Stage name.
+- Deployment association.
+- Automatic deployment where supported.
+- Stage variables for REST APIs.
+- Access logging.
+- Detailed metrics.
+- Throttling settings.
+- Canary settings for supported REST API deployments.
+- Tags.
+
+### Stage variables
+
+REST API stage variables allow configuration values to differ between stages.
+
+They can be used in supported integration and mapping configurations.
+
+Do not use stage variables as a secure secrets store. Use a suitable secret-management service for credentials.
+
+### Deployment workflow
+
+Typical REST API workflow:
+1. Create or update resources, methods, integrations, and policies.
+2. Validate the configuration.
+3. Create a deployment.
+4. Associate the deployment with a stage.
+5. Test the stage endpoint.
+6. Monitor errors and latency.
+
+HTTP APIs with automatic deployments enabled can publish changes automatically. This is convenient but should be controlled through environment separation and deployment governance.
+
+### Production release strategy
+
+Recommended:
+- Separate development, staging, and production configurations.
+- Use infrastructure as code.
+- Review changes before production.
+- Use canary or staged rollout mechanisms where supported.
+- Keep a rollback path.
+- Test authorization and error handling before release.
+
+## 11. Throttling, Quotas, and Caching
+
+### Throttling
+
+Throttling limits request rates.
+
+Possible settings:
+- Account-level API Gateway throttling quotas.
+- Stage-level throttling.
+- Method- or route-level settings where supported.
+- Usage-plan throttling for supported REST API configurations.
+- Backend concurrency and rate limits.
+
+Important:
+Throttling is generally enforced on a best-effort basis. Do not rely on it as the only defense against abuse or unexpected charges.
+
+### Quotas
+
+Usage plans for REST APIs can define quota periods and request limits.
+
+Quota enforcement is not a substitute for billing alarms, backend protection, or application-level limits.
+
+### Caching
+
+REST APIs can support API Gateway stage caching.
+
+Relevant settings include:
+- Cache enabled or disabled.
+- Cache capacity.
+- Cache TTL.
+- Per-method cache settings.
+- Cache key parameters.
+- Encryption of cached data where supported.
+- Invalidation behavior.
+
+Important:
+- API caching is not automatically enabled.
+- Cached responses can expose data if cache keys do not distinguish users or authorization contexts correctly.
+- Avoid caching sensitive or user-specific responses unless cache behavior has been carefully designed.
+- HTTP APIs do not have the same built-in stage cache feature as REST APIs. CloudFront or application caching may be appropriate instead.
+
+## 12. Timeouts, Retries, and Error Handling
+
+Important settings and considerations:
+- Integration timeout.
+- Backend timeout.
+- Client timeout.
+- Retry behavior.
+- Backend connection failures.
+- Request validation errors.
+- Authorization failures.
+- Throttling responses.
+- Gateway-generated errors.
+- Backend-generated errors.
+
+Common HTTP statuses:
+- 200: Successful request.
+- 201: Resource created.
+- 204: Successful request with no response body.
+- 400: Invalid request.
+- 401: Authentication required or invalid.
+- 403: Access denied.
+- 404: Resource or route not found.
+- 429: Request throttled.
+- 500: Internal server or integration error.
+- 502: Invalid or failed backend response.
+- 503: Service unavailable.
+- 504: Integration timed out.
+
+Exact status mapping depends on the integration and API type.
+
+Important:
+- API Gateway timeout limits vary by API type and integration configuration.
+- HTTP API integration timeouts have a documented maximum of 30 seconds.
+- REST API timeout settings and quota-adjustment options differ by integration type and Region.
+- A client timeout does not guarantee the backend stopped processing.
+- Retrying non-idempotent operations can create duplicate actions.
+- Use idempotency keys or equivalent application controls for operations that must not be duplicated.
+
+## 13. Logging and Monitoring
+
+### CloudWatch metrics
+
+Monitor available metrics for the API type and integration, including:
+- Request count.
+- Latency.
+- Integration latency.
+- 4XX errors.
+- 5XX errors.
+- Cache hits and misses for supported caching.
+- Throttled requests.
+- WebSocket connection and message metrics where applicable.
+
+Detailed metrics availability can depend on the API type and configuration.
+
+### Access logging
+
+Access logs record request-level information according to the configured format.
+
+Potential fields:
+- Request ID.
+- Extended request ID where available.
+- Source IP.
+- HTTP method.
+- Resource path or route key.
+- Status code.
+- Response size.
+- Request time.
+- Integration latency.
+- User or caller context where appropriate.
+
+Do not log authorization tokens, passwords, secrets, or sensitive request bodies unnecessarily.
+
+### Execution logging
+
+REST APIs support execution logging with configurable log levels. HTTP APIs have a different logging configuration model.
+
+Use detailed execution logs selectively because they can produce high volume and may expose sensitive information.
+
+### CloudTrail
+
+CloudTrail records API Gateway management activity, such as supported control-plane changes.
+
+For data-plane request visibility, configure the appropriate logging and monitoring mechanisms. Do not assume CloudTrail management events provide a complete record of every API request.
+
+### Alarms
+
+Consider alarms for:
+- Elevated 5XX rates.
+- High latency.
+- Unexpected 4XX or 429 rates.
+- Backend failures.
+- Request-volume anomalies.
+- Integration errors.
+- Cost or usage spikes.
+
+## 14. API Gateway and Lambda
+
+Common architecture:
+
+Client → API Gateway → Lambda → DynamoDB
+
+Important configuration:
+- Lambda integration.
+- API Gateway permission to invoke the Lambda function.
+- Route or method authorization.
+- Payload format version.
+- Lambda timeout and memory.
+- Error response handling.
+- CloudWatch logs.
+- Concurrency and throttling controls.
+
+Security:
+- Lambda execution role grants the function access to its backend services.
+- API Gateway invocation permission allows the API to invoke the function.
+- These are different permissions and should not be confused.
+
+If Lambda accesses private VPC resources, configure the Lambda VPC attachment separately. API Gateway does not place Lambda inside the VPC automatically.
+
+## 15. API Gateway and SQS/SNS
+
+A direct AWS service integration can sometimes avoid using Lambda as an intermediary.
+
+Examples:
+- API Gateway → SQS for asynchronous work.
+- API Gateway → SNS to publish notifications.
+
+Benefits:
+- Fewer components.
+- Potentially lower operational overhead.
+- Queue-based decoupling from backend processing.
+
+Important configuration:
+- IAM role assumed by API Gateway, where required.
+- Permissions scoped to the intended queue or topic.
+- Request mapping to the service's expected input format.
+- Correct content type and encoding.
+- Error handling and response mapping.
+- Queue or topic resource policies where applicable.
+
+Important:
+- A successful message submission does not mean downstream processing succeeded.
+- Use dead-letter queues and retries in the consumer architecture where appropriate.
+- Validate user input before submitting it.
+- Verify that the exact AWS service operation is supported by the chosen API type and integration.
+
+## 16. API Gateway and VPC Networking
+
+### Public API with public backend
+
+Client → Public API Gateway → Public HTTP backend
+
+The backend must be reachable from API Gateway's integration path.
+
+### Public API with private backend
+
+Client → Public API Gateway → VPC Link → Internal ALB/NLB → Private ECS or EC2 application
+
+This allows public API access while keeping the backend private.
+
+### Private REST API
+
+Client in VPC → Interface VPC endpoint → Private REST API
+
+The API is not directly accessible through a public API endpoint.
+
+### Network controls for private integrations
+
+Check:
+- VPC Link state.
+- VPC Link subnet and security-group configuration.
+- Load balancer listener.
+- Target group health.
+- Backend port.
+- Security group inbound rules.
+- Network ACLs if restrictive.
+- Route tables.
+- Backend TLS configuration.
+- DNS and hostname behavior.
+
+Important:
+A VPC Link does not automatically configure application authorization, backend security groups, or API client access restrictions.
+
+## 17. API Gateway and VPC Endpoints
+
+There are two different endpoint-related concepts.
+
+### A. Accessing a private API
+
+A private REST API is reached through an interface VPC endpoint for API Gateway.
+
+This is a client-to-API connection.
+
+### B. Accessing a backend inside a VPC
+
+A VPC Link connects API Gateway to supported private backend resources.
+
+This is an API-to-backend connection.
+
+Do not confuse either of these with a gateway endpoint for S3 or DynamoDB.
+
+API Gateway is itself an AWS-managed service, and its API endpoints are not generally accessed by creating an S3-style gateway endpoint.
+
+## 18. Custom Domains, DNS, and Certificates
+
+Typical setup:
+1. Register or manage a domain.
+2. Request or import an ACM certificate in the required Region.
+3. Configure the custom domain in API Gateway.
+4. Map the domain to the API and stage.
+5. Create the appropriate DNS record.
+6. Validate HTTPS and routing.
+
+Consider:
+- Regional versus edge-optimized custom domains for REST APIs.
+- Domain and certificate Region requirements.
+- API mapping paths.
+- DNS record type.
+- TLS policy.
+- Certificate renewal.
+- Custom domain configuration for HTTP and WebSocket APIs.
+
+Do not assume all API types use identical domain setup.
+
+## 19. AWS WAF and API Protection
+
+AWS WAF can help protect supported API Gateway configurations against common web attacks and abusive traffic.
+
+Potential controls:
+- Managed rule groups.
+- IP allowlists and denylists.
+- Rate-based rules.
+- Request inspection.
+- Geographic rules where appropriate.
+
+Additional controls:
+- Strong authentication.
+- Least-privilege authorization.
+- Input validation.
+- Payload-size limits.
+- Backend rate limiting.
+- Secure error responses.
+- Monitoring and alerting.
+
+Important:
+WAF does not replace authorization or application validation. Confirm the WAF association options supported by the selected API type and endpoint configuration.
+
+## 20. WebSocket-Specific Configuration
+
+Important WebSocket concepts:
+- Route selection expression.
+- Route keys.
+- `$connect` authorization.
+- `$disconnect` handling.
+- Default route.
+- Custom routes.
+- Integration configuration.
+- Connection IDs.
+- Connection management API.
+- Idle and maximum connection duration behavior.
+- Reconnection strategy.
+- Message size and rate quotas.
+
+Common pattern:
+
+Client connects → `$connect` → Application registers connection ID → Client sends message → Route invokes backend → Backend sends message through connection management API
+
+Production considerations:
+- Store active connection IDs when necessary.
+- Remove stale IDs when sends fail because connections are gone.
+- Make reconnects safe.
+- Apply authentication and authorization.
+- Consider message ordering and duplicate processing.
+- Monitor active connections and message volume.
+- Design around documented connection and message limits.
+
+## 21. Cost Components
+
+API Gateway cost depends on API type, Region, and configuration.
+
+Possible cost drivers:
+- Number of API requests.
+- WebSocket connection and message usage.
+- Data transfer.
+- REST API caching.
+- AWS WAF.
+- CloudWatch log ingestion and storage.
+- X-Ray tracing.
+- VPC Link and associated networking resources where chargeable.
+- Backend Lambda, ECS, EC2, SQS, or other service usage.
+- Custom domain and related infrastructure costs.
+
+Cost controls:
+- Select HTTP API when it meets requirements.
+- Avoid unnecessary execution logging.
+- Set log retention.
+- Monitor request volume and 4XX/5XX rates.
+- Use caching only when safe and beneficial.
+- Set budgets and billing alarms.
+- Protect endpoints against abuse.
+
+## 22. Limits and Exceptions
+
+API Gateway quotas vary by API type, Region, integration, and account configuration. Verify current quotas before production sizing.
+
+Important examples:
+- HTTP API payload size has a documented 10 MB limit.
+- HTTP API integration timeout has a documented maximum of 30 seconds.
+- HTTP API route and integration quotas differ; some can be increased and some cannot.
+- REST API and WebSocket API quotas differ from HTTP API quotas.
+- Throttling is not a guaranteed hard cap.
+- Private API endpoints are a REST API feature.
+- API keys and usage plans are not interchangeable with authentication.
+- REST API caching is not the same as HTTP API functionality.
+- Deployment behavior differs between REST APIs and HTTP APIs.
+- Request/response transformation features differ by API type.
+- WebSocket APIs have separate connection and message constraints.
+- Custom domain behavior varies by API type and endpoint.
+- Backend permissions are still required for integrations.
+- A successful API response does not prove asynchronous downstream work completed.
+- API Gateway does not automatically make a backend private.
+- API Gateway does not automatically grant Lambda or other backend permissions.
+- API Gateway does not replace WAF, IAM, application authorization, or input validation.
+
+Current quota documentation:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html
+https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html
+
+## 23. Production-Ready Configuration Checklist
+
+### API design
+- Choose HTTP, REST, or WebSocket API based on requirements.
+- Define routes and methods clearly.
+- Use versioned and documented API contracts where needed.
+- Validate inputs.
+- Standardize response and error formats.
+- Avoid exposing internal backend errors.
+
+### Security
+- Require suitable authorization.
+- Apply least-privilege IAM permissions.
+- Configure resource policies where appropriate.
+- Use TLS and secure custom domains.
+- Use WAF where supported and warranted.
+- Avoid logging tokens and sensitive payloads.
+- Review CORS origins and methods.
+- Protect sensitive backend operations with application-level authorization.
+
+### Networking
+- Keep private backends private.
+- Use VPC Link for supported private integrations.
+- Use an interface VPC endpoint to reach private REST APIs.
+- Validate security groups, routes, listeners, and target health.
+- Test DNS and TLS end to end.
+
+### Reliability
+- Configure backend timeouts and retries deliberately.
+- Make retryable operations idempotent.
+- Use queues for asynchronous workloads where appropriate.
+- Configure dead-letter handling in downstream services.
+- Plan for backend failures and throttling.
+- Test rollback and deployment procedures.
+
+### Observability
+- Enable access logging.
+- Enable appropriate metrics.
+- Use detailed logs only when needed.
+- Configure alarms for latency and error rates.
+- Set log retention.
+- Use tracing when it provides meaningful troubleshooting value.
+
+### Cost and governance
+- Monitor request volume and spend.
+- Set budgets and alarms.
+- Use infrastructure as code.
+- Separate environments.
+- Review quotas and scaling assumptions.
+- Restrict who can change API deployments and authorization.
+
+## 24. Terraform Example — HTTP API with Lambda
+
+This is a minimal illustrative Terraform configuration for an HTTP API integrated with an existing Lambda function. It assumes the Lambda function already exists and that the deployment identity has permission to create API Gateway resources and Lambda invocation permissions.
+
+```hcl
+variable "lambda_function_name" {
+  type = string
+}
+
+variable "lambda_invoke_arn" {
+  type = string
+}
+
+resource "aws_apigatewayv2_api" "api" {
+  name          = "application-api"
+  protocol_type = "HTTP"
+
+  tags = {
+    Environment = "production"
+    ManagedBy   = "Terraform"
+  }
+}
+
+resource "aws_apigatewayv2_integration" "lambda" {
+  api_id                 = aws_apigatewayv2_api.api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = var.lambda_invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "get_items" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "GET /items"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.api.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_lambda_permission" "allow_api_gateway" {
+  statement_id  = "AllowApiGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = var.lambda_function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+}
+```
+
+Important production changes:
+- Configure access logging and retention.
+- Add suitable authorization.
+- Restrict Lambda invocation permission to the intended API and routes where practical.
+- Add CORS only if required.
+- Add custom domain and certificate if needed.
+- Add throttling and monitoring appropriate to the API type.
+- Use separate environments and reviewed Terraform deployments.
+- Ensure the Lambda function has its own least-privilege execution role.
+- Validate current Terraform provider attributes before deployment.
+
+This example intentionally does not configure authentication, CORS, custom domains, WAF, or production logging.
+
+## 25. Quick Decision Summary
+
+Use HTTP API when:
+- You need a standard HTTP API.
+- Lambda or an HTTP backend is sufficient.
+- You want a simpler, generally lower-cost API option.
+
+Use REST API when:
+- You need features such as usage plans, API keys, advanced request validation or transformations, or private REST API endpoints.
+- You need specific REST API management features not available in HTTP APIs.
+
+Use WebSocket API when:
+- Clients and servers need persistent, bidirectional messaging.
+- Real-time updates are required.
+
+Use VPC Link when:
+- API Gateway needs to reach a supported private backend in a VPC.
+
+Use a private REST API with an interface VPC endpoint when:
+- Clients must reach the API through private network connectivity.
+
+Use direct AWS service integration when:
+- API Gateway can safely invoke the required service operation without needing Lambda business logic.
+
+Remember:
+API Gateway is the API front door. Lambda, ECS, EC2, SQS, databases, and other services provide the backend processing or data. API type, authorization, client-facing endpoint, backend integration, and VPC connectivity are separate design decisions.
+
+## Official AWS Documentation
+
+API Gateway overview:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/welcome.html
+
+Choose between REST APIs and HTTP APIs:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-vs-rest.html
+
+HTTP APIs:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html
+
+REST APIs:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-rest-api.html
+
+WebSocket APIs:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html
+
+Private APIs:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-private-apis.html
+
+VPC Link:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-vpc-links-v2.html
+
+Quotas:
+https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html
