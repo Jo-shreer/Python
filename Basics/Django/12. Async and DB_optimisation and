@@ -1,0 +1,1413 @@
+# Django Backend Developer Interview Preparation
+## Asynchronous Programming & High-Load Database Management
+
+# 1. ASYNCHRONOUS PROGRAMMING IN PYTHON
+
+## 1.1 What is asynchronous programming?
+
+Asynchronous programming allows an application to handle multiple operations concurrently without blocking execution while waiting for I/O operations to complete.
+
+For example, a Django application may need to:
+1. Fetch user information from a database.
+2. Call an external payment API.
+3. Send an email.
+4. Fetch product information.
+
+In synchronous programming, these operations may execute one after another.
+
+In asynchronous programming, independent I/O operations can overlap, reducing overall waiting time.
+
+### Synchronous example
+
+```python
+import time
+
+def fetch_user():
+    time.sleep(2)
+    return "User data"
+
+def fetch_products():
+    time.sleep(3)
+    return "Product data"
+
+def main():
+    user = fetch_user()
+    products = fetch_products()
+
+    print(user, products)
+
+main()
+```
+
+Total execution time: approximately 5 seconds.
+
+### Asynchronous example
+
+```python
+import asyncio
+
+async def fetch_user():
+    await asyncio.sleep(2)
+    return "User data"
+
+async def fetch_products():
+    await asyncio.sleep(3)
+    return "Product data"
+
+async def main():
+
+    results = await asyncio.gather(
+        fetch_user(),
+        fetch_products()
+    )
+
+    print(results)
+
+asyncio.run(main())
+```
+
+Total execution time: approximately 3 seconds.
+
+The operations execute concurrently because they are waiting for I/O.
+
+## 1.2 Important Python async keywords
+
+### async
+
+Defines an asynchronous function.
+
+```python
+async def get_user():
+    return "John"
+```
+
+### await
+
+Waits for an asynchronous operation without blocking the event loop.
+
+```python
+async def get_user():
+    await asyncio.sleep(2)
+    return "John"
+```
+
+### asyncio.gather()
+
+Runs multiple asynchronous operations concurrently and collects their results.
+
+```python
+results = await asyncio.gather(
+    fetch_user(),
+    fetch_products()
+)
+```
+
+### asyncio.create_task()
+
+Schedules a coroutine to run as a task.
+
+```python
+async def main():
+
+    task1 = asyncio.create_task(fetch_user())
+    task2 = asyncio.create_task(fetch_products())
+
+    user = await task1
+    products = await task2
+
+    print(user, products)
+```
+
+### asyncio.wait_for()
+
+Adds a timeout to an asynchronous operation.
+
+```python
+result = await asyncio.wait_for(
+    fetch_user(),
+    timeout=5
+)
+```
+
+### asyncio.Semaphore()
+
+Limits the number of concurrent operations.
+
+```python
+import asyncio
+
+semaphore = asyncio.Semaphore(5)
+
+async def fetch_data():
+
+    async with semaphore:
+        await asyncio.sleep(2)
+        return "Data fetched"
+```
+
+Useful when calling external APIs with concurrency limits.
+
+---
+
+# 2. ASYNCHRONOUS PROGRAMMING IN DJANGO
+
+Django supports asynchronous views and asynchronous ORM operations.
+
+## 2.1 Async Django view
+
+```python
+from django.http import JsonResponse
+import httpx
+
+async def get_users(request):
+
+    async with httpx.AsyncClient() as client:
+
+        response = await client.get(
+            "https://api.example.com/users"
+        )
+
+    return JsonResponse(response.json(), safe=False)
+```
+
+This allows Django to perform asynchronous HTTP requests without blocking the event loop while waiting for the response.
+
+## 2.2 Django asynchronous ORM
+
+Modern Django supports asynchronous ORM methods.
+
+### Fetch one record
+
+```python
+employee = await Employee.objects.aget(id=1)
+```
+
+### Create a record
+
+```python
+employee = await Employee.objects.acreate(
+    name="John",
+    email="john@example.com"
+)
+```
+
+### Filter records
+
+```python
+employees = [
+    employee
+    async for employee in Employee.objects.filter(
+        department="IT"
+    )
+]
+```
+
+### Check whether records exist
+
+```python
+exists = await Employee.objects.filter(
+    department="IT"
+).aexists()
+```
+
+### Count records
+
+```python
+count = await Employee.objects.acount()
+```
+
+Important: Django's async ORM support varies by operation and version. Some database operations still require synchronous execution. Transactions should generally be placed inside synchronous functions using `transaction.atomic()` and called through `sync_to_async()` when needed.
+
+## 2.3 sync_to_async()
+
+Used to call synchronous functions from asynchronous code.
+
+```python
+from asgiref.sync import sync_to_async
+from django.db import transaction
+
+@sync_to_async
+def get_employee():
+
+    with transaction.atomic():
+
+        employee = Employee.objects.select_for_update().get(id=1)
+
+        employee.status = "active"
+        employee.save()
+
+        return employee.name
+```
+
+Usage:
+
+```python
+async def employee_view(request):
+
+    name = await get_employee()
+
+    return JsonResponse({"name": name})
+```
+
+## 2.4 async_to_sync()
+
+Used to call asynchronous functions from synchronous code.
+
+```python
+from asgiref.sync import async_to_sync
+
+async def fetch_data():
+    return "Data fetched"
+
+result = async_to_sync(fetch_data)()
+```
+
+## 2.5 ASGI and WSGI
+
+### WSGI
+
+Web Server Gateway Interface.
+
+Traditionally used for synchronous Python web applications.
+
+### ASGI
+
+Asynchronous Server Gateway Interface.
+
+Supports asynchronous Django applications, WebSockets, and long-lived connections.
+
+Common ASGI servers:
+- Uvicorn
+- Daphne
+- Hypercorn
+
+Django ASGI configuration:
+
+```python
+ASGI_APPLICATION = "project.asgi.application"
+```
+
+---
+
+# 3. ASYNC VS THREADING VS MULTIPROCESSING
+
+| Feature | Asyncio | Multithreading | Multiprocessing |
+|---|---|---|---|
+| Best for | I/O-bound operations | I/O-bound operations | CPU-bound operations |
+| Execution | Event loop | Multiple threads | Multiple processes |
+| Memory usage | Usually lower | Shared process memory | Separate process memory |
+| GIL | Does not bypass GIL | Affects Python CPU work | Separate processes |
+| Example | API requests | File/network operations | Image processing |
+
+### When to use each?
+
+Asyncio:
+- External API requests.
+- Multiple HTTP calls.
+- WebSockets.
+- Network operations.
+
+Multithreading:
+- Blocking I/O operations.
+- Legacy synchronous libraries.
+- Concurrent file or network operations.
+
+Multiprocessing:
+- Image processing.
+- Video processing.
+- Large mathematical calculations.
+- CPU-intensive operations.
+
+---
+
+# 4. CELERY AND BACKGROUND TASK PROCESSING
+
+## 4.1 What is Celery?
+
+Celery is a distributed task queue used to execute background tasks outside the main Django request-response cycle.
+
+For example:
+- Sending emails.
+- Generating PDF reports.
+- Processing uploaded files.
+- Sending notifications.
+- Running scheduled jobs.
+
+## 4.2 Why use Celery?
+
+Suppose a user registers on your website.
+
+The application needs to:
+1. Save user information.
+2. Send a welcome email.
+3. Generate a welcome PDF.
+4. Send a notification.
+
+Sending the email and generating the PDF synchronously can make the registration API slow.
+
+Instead, use Celery to execute those operations in the background.
+
+## 4.3 Celery example
+
+tasks.py:
+
+```python
+from celery import shared_task
+
+@shared_task
+def send_welcome_email(email):
+
+    print(f"Sending email to {email}")
+
+    return "Email sent"
+```
+
+views.py:
+
+```python
+from django.http import JsonResponse
+from .tasks import send_welcome_email
+
+def register_user(request):
+
+    email = "john@example.com"
+
+    send_welcome_email.delay(email)
+
+    return JsonResponse({
+        "message": "Registration successful"
+    })
+```
+
+The `.delay()` method sends the task to the Celery broker.
+
+## 4.4 Celery architecture
+
+Django Application → Message Broker → Celery Worker → Task Execution.
+
+Common message brokers:
+- Redis.
+- RabbitMQ.
+
+Celery Beat is used for scheduled tasks.
+
+Example:
+
+```python
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "daily-report": {
+        "task": "reports.tasks.generate_report",
+        "schedule": crontab(hour=8, minute=0),
+    }
+}
+```
+
+---
+
+# 5. MANAGING HIGH-LOAD DATABASE QUERIES
+
+## 5.1 What is high-load database management?
+
+High-load database management means optimizing database performance when many users or applications access the database simultaneously.
+
+Example:
+
+An e-commerce application receives 50,000 requests per minute.
+
+Possible problems:
+- Slow SQL queries.
+- Too many database connections.
+- High CPU usage.
+- Database locks.
+- Deadlocks.
+- Connection timeouts.
+- High memory consumption.
+
+The objective is to reduce database load and maintain good response times.
+
+## 5.2 Django ORM query optimization
+
+### N+1 query problem
+
+Bad approach:
+
+```python
+employees = Employee.objects.all()
+
+for employee in employees:
+    print(employee.department.name)
+```
+
+This can execute one query for employees and additional queries for each department.
+
+Optimized approach:
+
+```python
+employees = Employee.objects.select_related(
+    "department"
+)
+
+for employee in employees:
+    print(employee.department.name)
+```
+
+### select_related()
+
+Used for:
+- ForeignKey.
+- OneToOneField.
+
+Uses SQL JOIN to retrieve related data.
+
+### prefetch_related()
+
+Used for:
+- ManyToManyField.
+- Reverse ForeignKey relationships.
+
+Uses separate queries and joins the results in Python.
+
+Example:
+
+```python
+courses = Course.objects.prefetch_related(
+    "students"
+)
+```
+
+### only()
+
+Fetches only selected model fields initially.
+
+```python
+employees = Employee.objects.only(
+    "id",
+    "name"
+)
+```
+
+### defer()
+
+Avoids loading selected fields initially.
+
+```python
+employees = Employee.objects.defer(
+    "description"
+)
+```
+
+### values()
+
+Returns dictionaries instead of model objects.
+
+```python
+employees = Employee.objects.values(
+    "id",
+    "name"
+)
+```
+
+### values_list()
+
+Returns tuples or flat values.
+
+```python
+names = Employee.objects.values_list(
+    "name",
+    flat=True
+)
+```
+
+### exists()
+
+Efficiently checks whether records exist.
+
+```python
+exists = Employee.objects.filter(
+    department="IT"
+).exists()
+```
+
+### count()
+
+Counts records efficiently.
+
+```python
+total = Employee.objects.count()
+```
+
+### bulk_create()
+
+Inserts multiple records efficiently.
+
+```python
+employees = [
+    Employee(name="John"),
+    Employee(name="David"),
+    Employee(name="Mike")
+]
+
+Employee.objects.bulk_create(employees)
+```
+
+### bulk_update()
+
+Updates multiple records efficiently.
+
+```python
+employees = Employee.objects.filter(
+    department="IT"
+)
+
+for employee in employees:
+    employee.status = "active"
+
+Employee.objects.bulk_update(
+    employees,
+    ["status"]
+)
+```
+
+Note: Bulk operations bypass normal per-instance save behavior and model save signals. Validate data and handle business logic accordingly.
+
+---
+
+# 6. DATABASE INDEXING
+
+## What is database indexing?
+
+An index is a data structure that helps a database locate records faster without scanning the entire table.
+
+Example:
+
+```python
+class Employee(models.Model):
+
+    name = models.CharField(max_length=100)
+
+    email = models.EmailField(
+        db_index=True
+    )
+```
+
+Query:
+
+```python
+Employee.objects.filter(
+    email="john@example.com"
+)
+```
+
+The index can improve lookup performance.
+
+## Types of database indexes
+
+1. Single-column index.
+2. Composite index.
+3. Unique index.
+4. Partial index.
+5. Functional index.
+6. Full-text index.
+7. B-tree index.
+8. Hash index.
+9. GIN index.
+10. GiST index.
+
+### Composite index example
+
+```python
+class Order(models.Model):
+
+    customer_id = models.IntegerField()
+
+    status = models.CharField(max_length=50)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["customer_id", "status"]
+            )
+        ]
+```
+
+Useful for queries filtering by both customer_id and status.
+
+Important: Indexes improve some reads but consume storage and can slow down INSERT, UPDATE, and DELETE operations.
+
+---
+
+# 7. DATABASE CONNECTION POOLING
+
+## What is connection pooling?
+
+Connection pooling maintains reusable database connections rather than establishing a new database connection for every request.
+
+Benefits:
+- Reduces connection establishment overhead.
+- Controls database connection usage.
+- Improves scalability.
+- Reduces connection churn.
+
+## Django persistent connections
+
+```python
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "mydb",
+        "USER": "postgres",
+        "PASSWORD": "password",
+        "HOST": "localhost",
+        "PORT": "5432",
+        "CONN_MAX_AGE": 60,
+    }
+}
+```
+
+`CONN_MAX_AGE` controls how long Django can reuse a persistent connection, subject to its connection lifecycle.
+
+Persistent connections are not the same as a centralized connection pool.
+
+## PgBouncer
+
+PgBouncer is a PostgreSQL connection pooling tool.
+
+Architecture:
+
+Django → PgBouncer → PostgreSQL.
+
+### PgBouncer pooling modes
+
+1. Session pooling: Connection is assigned for the entire client session.
+2. Transaction pooling: Connection is assigned for the duration of a transaction.
+3. Statement pooling: Connection is released after each statement.
+
+Transaction pooling is useful for high-concurrency workloads but requires care with session-level state and certain PostgreSQL features.
+
+---
+
+# 8. REDIS CACHING
+
+## What is Redis?
+
+Redis is an in-memory data store used for:
+- Caching.
+- Session management.
+- Message brokering.
+- Distributed locks.
+- Temporary data storage.
+
+## Django caching example
+
+```python
+from django.core.cache import cache
+
+def get_products():
+
+    products = cache.get("products")
+
+    if products is None:
+
+        products = list(
+            Product.objects.values(
+                "id",
+                "name",
+                "price"
+            )
+        )
+
+        cache.set(
+            "products",
+            products,
+            timeout=300
+        )
+
+    return products
+```
+
+The cache stores the products for 300 seconds.
+
+## Types of caching
+
+1. Application-level caching.
+2. Database query caching.
+3. Full-page caching.
+4. Per-view caching.
+5. Template fragment caching.
+6. Browser caching.
+7. CDN caching.
+
+## Django per-view caching
+
+```python
+from django.views.decorators.cache import cache_page
+
+@cache_page(60 * 5)
+def product_list(request):
+
+    products = Product.objects.all()
+
+    return render(
+        request,
+        "products.html",
+        {"products": products}
+    )
+```
+
+Important: Cache invalidation is essential when underlying data changes.
+
+---
+
+# 9. DATABASE TRANSACTIONS AND CONCURRENCY
+
+## What is a database transaction?
+
+A transaction is a group of database operations that should succeed or fail together.
+
+Django provides `transaction.atomic()`.
+
+Example:
+
+```python
+from django.db import transaction
+
+def transfer_money(sender, receiver, amount):
+
+    with transaction.atomic():
+
+        sender.balance -= amount
+        sender.save()
+
+        receiver.balance += amount
+        receiver.save()
+```
+
+If an exception occurs inside the transaction, the transaction is rolled back.
+
+## ACID properties
+
+1. Atomicity: All operations succeed or none do.
+2. Consistency: Database rules remain valid.
+3. Isolation: Concurrent transactions are controlled.
+4. Durability: Committed changes persist.
+
+## select_for_update()
+
+Used to lock selected rows during a transaction.
+
+```python
+from django.db import transaction
+
+def update_balance(account_id, amount):
+
+    with transaction.atomic():
+
+        account = Account.objects.select_for_update().get(
+            id=account_id
+        )
+
+        account.balance += amount
+
+        account.save()
+```
+
+This helps prevent conflicting concurrent modifications.
+
+## Optimistic locking
+
+Optimistic locking uses a version number to detect concurrent updates.
+
+Example concept:
+
+```python
+from django.db.models import F
+
+updated = Account.objects.filter(
+    id=account_id,
+    version=current_version
+).update(
+    balance=F("balance") + amount,
+    version=F("version") + 1
+)
+
+if updated == 0:
+    raise Exception("Concurrent update detected")
+```
+
+This is useful when conflicts are relatively uncommon.
+
+---
+
+# 10. DATABASE DEADLOCKS
+
+## What is a deadlock?
+
+A deadlock occurs when two or more transactions wait for each other to release locked resources.
+
+Example:
+
+Transaction A locks Account 1 and waits for Account 2.
+
+Transaction B locks Account 2 and waits for Account 1.
+
+Neither transaction can continue.
+
+### How to prevent deadlocks
+
+1. Acquire locks in a consistent order.
+2. Keep transactions short.
+3. Avoid unnecessary row locking.
+4. Use appropriate transaction isolation.
+5. Handle deadlock errors and retry safely.
+6. Avoid external API calls while holding database locks.
+
+---
+
+# 11. DATABASE READ REPLICAS
+
+## What is database replication?
+
+Replication means copying database data from a primary database to one or more replica databases.
+
+Architecture:
+
+Django Application
+    |
+    |-- Read Queries → Replica Database
+    |
+    |-- Write Queries → Primary Database
+
+Benefits:
+- Distributes read traffic.
+- Reduces primary database workload.
+- Improves read scalability.
+- Supports reporting workloads.
+
+Django database router:
+
+```python
+class DatabaseRouter:
+
+    def db_for_read(self, model, **hints):
+        return "replica"
+
+    def db_for_write(self, model, **hints):
+        return "default"
+```
+
+Settings:
+
+```python
+DATABASE_ROUTERS = [
+    "myapp.routers.DatabaseRouter"
+]
+```
+
+Important: Replication lag means a recent write may not immediately be available on a replica. Use the primary database when read-after-write consistency is required.
+
+---
+
+# 12. PAGINATION
+
+Pagination prevents an application from retrieving huge amounts of data in one request.
+
+Bad approach:
+
+```python
+employees = Employee.objects.all()
+```
+
+Better:
+
+```python
+employees = Employee.objects.all()[:20]
+```
+
+Django REST Framework pagination:
+
+```python
+from rest_framework.pagination import PageNumberPagination
+
+class EmployeePagination(PageNumberPagination):
+
+    page_size = 20
+
+    page_size_query_param = "page_size"
+
+    max_page_size = 100
+```
+
+### Types of pagination
+
+1. Page-number pagination.
+2. Limit-offset pagination.
+3. Cursor pagination.
+
+Cursor pagination is often preferable for large, frequently changing datasets when records have a suitable stable ordering.
+
+---
+
+# 13. DATABASE QUERY MONITORING
+
+Important tools for identifying performance problems:
+
+1. Django Debug Toolbar.
+2. QuerySet.explain().
+3. PostgreSQL EXPLAIN ANALYZE.
+4. PostgreSQL slow query logs.
+5. pg_stat_statements.
+6. New Relic.
+7. Datadog.
+8. Sentry.
+9. Prometheus.
+10. Grafana.
+
+Example:
+
+```python
+queryset = Employee.objects.filter(
+    department="IT"
+)
+
+print(queryset.explain())
+```
+
+This helps inspect the database query execution plan.
+
+For PostgreSQL:
+
+```sql
+EXPLAIN ANALYZE
+SELECT *
+FROM employee
+WHERE department = 'IT';
+```
+
+Look for:
+- Sequential scans.
+- Index scans.
+- Expensive joins.
+- Large row counts.
+- Sorting operations.
+- Execution time.
+
+---
+
+# 14. DJANGO APPLICATION PERFORMANCE AND SCALABILITY
+
+Other important concepts to prepare:
+
+### Gunicorn
+A Python WSGI application server commonly used to run Django applications.
+
+### Uvicorn
+An ASGI server that supports asynchronous applications.
+
+### Nginx
+A web server and reverse proxy commonly used for load balancing, static files, and request forwarding.
+
+### Load balancing
+Distributes incoming requests across multiple application servers.
+
+### Docker
+Packages applications and their dependencies into containers.
+
+### Kubernetes
+Orchestrates containerized applications.
+
+### Horizontal scaling
+Adding more application instances or servers.
+
+### Vertical scaling
+Increasing CPU, RAM, or other resources on an existing server.
+
+### Rate limiting
+Restricts how frequently a user or client can access an API.
+
+### API throttling
+Controls request rates to protect backend resources.
+
+### Circuit breaker
+Prevents repeated calls to a failing external service.
+
+### Retry mechanism
+Retries temporary failures using controlled delays and backoff.
+
+### Exponential backoff
+Increases the waiting time between retries.
+
+### Message queues
+Allow applications to process tasks asynchronously through brokers such as RabbitMQ and Redis.
+
+### Database sharding
+Splits data across multiple database instances.
+
+### CDN
+Delivers static assets from geographically distributed servers.
+
+### Health checks
+Monitor whether application services are functioning correctly.
+
+### Observability
+Uses logs, metrics, and distributed traces to understand application behavior.
+
+---
+
+# 15. IMPORTANT INTERVIEW QUESTIONS AND ANSWERS
+
+## ASYNCHRONOUS PROGRAMMING
+
+### Q1. What is asynchronous programming?
+
+Asynchronous programming allows an application to execute multiple I/O-bound operations concurrently without blocking the event loop while waiting for operations to complete.
+
+### Q2. What is the difference between synchronous and asynchronous programming?
+
+Synchronous programming executes operations sequentially.
+
+Asynchronous programming allows other tasks to execute while an I/O operation is waiting.
+
+### Q3. What are async and await?
+
+`async` defines a coroutine function.
+
+`await` pauses the current coroutine until an awaitable operation completes, allowing other tasks to run.
+
+### Q4. What is asyncio?
+
+Asyncio is Python's library for writing concurrent code using coroutines, tasks, and event loops.
+
+### Q5. What is asyncio.gather()?
+
+It schedules multiple awaitables concurrently and collects their results.
+
+### Q6. What is asyncio.create_task()?
+
+It schedules a coroutine to run as a task and returns a task object.
+
+### Q7. What is the GIL?
+
+The Global Interpreter Lock is a mechanism in standard CPython builds that generally allows only one thread to execute Python bytecode at a time within a process.
+
+### Q8. What is ASGI?
+
+ASGI stands for Asynchronous Server Gateway Interface. It supports asynchronous Python applications, including Django async views and WebSockets.
+
+### Q9. What is WSGI?
+
+WSGI stands for Web Server Gateway Interface. It is the traditional synchronous Python web application interface.
+
+### Q10. What is the difference between Celery and asyncio?
+
+Asyncio handles concurrent operations within an application process.
+
+Celery distributes background tasks across workers and can process tasks independently of the request-response cycle.
+
+### Q11. Can Django ORM work asynchronously?
+
+Yes. Modern Django supports asynchronous ORM operations such as `aget()`, `acreate()`, `aexists()`, and asynchronous QuerySet iteration.
+
+Some operations, particularly transaction workflows, still require synchronous execution.
+
+---
+
+## DATABASE PERFORMANCE
+
+### Q12. What is query optimization?
+
+Query optimization improves database performance by reducing unnecessary queries, retrieving only required fields, using indexes, and optimizing relationships.
+
+### Q13. What is the N+1 query problem?
+
+It occurs when one query retrieves a collection of records and additional queries are executed for each record to retrieve related objects.
+
+### Q14. Difference between select_related() and prefetch_related()?
+
+`select_related()` uses SQL JOIN for ForeignKey and OneToOne relationships.
+
+`prefetch_related()` performs separate queries and combines the results in Python. It supports ManyToMany and reverse ForeignKey relationships.
+
+### Q15. What is database indexing?
+
+Indexing creates a data structure that helps the database locate records faster.
+
+### Q16. What is database connection pooling?
+
+Connection pooling maintains reusable connections and reduces the overhead of establishing new database connections.
+
+### Q17. What is PgBouncer?
+
+PgBouncer is a lightweight connection pooler for PostgreSQL.
+
+### Q18. What is Redis?
+
+Redis is an in-memory data store used for caching, session storage, distributed locks, and message brokering.
+
+### Q19. What is database replication?
+
+Replication copies data from a primary database to one or more replicas, allowing read traffic to be distributed.
+
+### Q20. What is database sharding?
+
+Sharding distributes data across multiple database instances based on a partitioning strategy.
+
+### Q21. What is a database deadlock?
+
+A deadlock occurs when transactions wait for each other to release locked resources, preventing them from proceeding.
+
+### Q22. What is transaction.atomic()?
+
+It ensures a group of database operations executes as a single transaction, with rollback if an exception causes the transaction to fail.
+
+### Q23. What is select_for_update()?
+
+It locks selected database rows during a transaction to prevent conflicting concurrent modifications.
+
+### Q24. What is query pagination?
+
+Pagination divides large query results into smaller manageable batches.
+
+### Q25. How do you identify slow database queries?
+
+I use Django Debug Toolbar, QuerySet.explain(), PostgreSQL EXPLAIN ANALYZE, query logs, pg_stat_statements, and APM tools.
+
+---
+
+# 16. REAL-WORLD PRODUCTION SCENARIOS
+
+## Scenario 1: Your Django API is responding slowly. What would you do?
+
+Answer:
+
+First, I would investigate API response times and identify whether the bottleneck is in the application, database, external APIs, or network.
+
+Then I would:
+1. Identify slow queries.
+2. Optimize ORM queries.
+3. Add suitable database indexes.
+4. Implement Redis caching.
+5. Introduce pagination.
+6. Reduce unnecessary external API calls.
+7. Use asynchronous processing where appropriate.
+8. Monitor performance after changes.
+
+## Scenario 2: Your application receives 50,000 requests per minute. How would you scale it?
+
+Answer:
+
+I would:
+1. Use multiple Django application instances.
+2. Configure load balancing.
+3. Optimize database queries.
+4. Use Redis caching.
+5. Configure PgBouncer.
+6. Introduce read replicas.
+7. Use Celery for background tasks.
+8. Configure rate limiting.
+9. Monitor CPU, memory, connections, and response times.
+10. Scale application and database resources based on actual traffic.
+
+## Scenario 3: Your database has too many connections. How would you solve it?
+
+Answer:
+
+I would:
+1. Inspect active and idle connections.
+2. Check application worker counts and connection usage.
+3. Configure connection lifetimes appropriately.
+4. Introduce PgBouncer if suitable.
+5. Set reasonable connection pool limits.
+6. Close or recycle stale connections.
+7. Monitor database connection utilization.
+
+## Scenario 4: Your Django application executes too many database queries. What would you do?
+
+Answer:
+
+I would:
+1. Identify repeated queries.
+2. Use `select_related()`.
+3. Use `prefetch_related()`.
+4. Use `only()` and `values()` where appropriate.
+5. Add caching.
+6. Implement bulk operations.
+7. Monitor the SQL execution plan.
+
+## Scenario 5: An external API takes 10 seconds to respond. How would you improve performance?
+
+Answer:
+
+I would:
+1. Use an asynchronous HTTP client such as HTTPX.
+2. Set connection and request timeouts.
+3. Execute independent requests concurrently.
+4. Add retry logic with exponential backoff where safe.
+5. Cache suitable API responses.
+6. Use a background task for operations that don't need to finish during the request.
+7. Add circuit-breaker logic for unreliable dependencies.
+
+## Scenario 6: Two users update the same bank account simultaneously. How would you handle it?
+
+Answer:
+
+I would use database transactions and appropriate concurrency control.
+
+For example, I could use `transaction.atomic()` and `select_for_update()` to lock the account row while updating its balance.
+
+This helps prevent conflicting updates and ensures transaction consistency.
+
+## Scenario 7: Your application has thousands of product searches every minute. What would you do?
+
+Answer:
+
+I would:
+1. Add appropriate indexes to searchable columns.
+2. Optimize filtering and sorting.
+3. Use Redis caching for frequently requested results.
+4. Implement pagination.
+5. Avoid unnecessary related-object queries.
+6. Consider PostgreSQL full-text search or a dedicated search engine if search requirements become complex.
+7. Monitor query execution plans.
+
+---
+
+# 17. COMPLETE PRODUCTION ARCHITECTURE
+
+A scalable Django backend can use the following architecture:
+
+User / Frontend
+       |
+       v
+Nginx / Load Balancer
+       |
+       v
+Django Application (Multiple Workers)
+       |
+       |------ Redis Cache
+       |
+       |------ Celery Message Broker
+       |              |
+       |              v
+       |        Celery Workers
+       |
+       v
+PgBouncer
+       |
+       v
+PostgreSQL Primary Database
+       |
+       |------ Read Replica 1
+       |
+       |------ Read Replica 2
+
+Additional infrastructure:
+- Prometheus for metrics.
+- Grafana for dashboards.
+- Sentry for error tracking.
+- New Relic or Datadog for application monitoring.
+- Docker for containerization.
+- Kubernetes for container orchestration.
+
+---
+
+# 18. BEST INTERVIEW ANSWER: EXPLAIN YOUR EXPERIENCE
+
+If an interviewer asks:
+
+"How proficient are you in asynchronous programming and managing high-load database queries?"
+
+You can answer:
+
+"I have a good understanding of Python asynchronous programming and Django backend performance optimization.
+
+For asynchronous programming, I work with async and await, asyncio, asynchronous Django views, and asynchronous HTTP requests. I understand how to execute independent I/O-bound operations concurrently and how to use background task processing with Celery.
+
+For database performance, I focus on optimizing Django ORM queries using select_related(), prefetch_related(), indexing, pagination, and bulk operations.
+
+I also understand Redis caching, database connection pooling using PgBouncer, PostgreSQL query execution plans, transaction management, and read replicas.
+
+For high-traffic applications, I would combine these techniques with application monitoring, load balancing, and horizontal scaling to improve performance and reliability."
+
+---
+
+# 19. QUICK REVISION CHEAT SHEET
+
+| Concept | What it does |
+|---|---|
+| async / await | Asynchronous programming |
+| asyncio | Event-loop-based concurrency |
+| gather() | Run multiple awaitables concurrently |
+| create_task() | Schedule a coroutine |
+| Semaphore | Limit concurrent tasks |
+| sync_to_async() | Call sync code from async code |
+| ASGI | Asynchronous application interface |
+| WSGI | Traditional synchronous application interface |
+| Celery | Background task processing |
+| RabbitMQ | Message broker |
+| Redis | In-memory caching and message broker |
+| select_related() | Optimize ForeignKey / OneToOne |
+| prefetch_related() | Optimize ManyToMany / reverse ForeignKey |
+| bulk_create() | Insert multiple records |
+| bulk_update() | Update multiple records |
+| db_index | Add a database index |
+| PgBouncer | PostgreSQL connection pooling |
+| transaction.atomic() | Manage database transactions |
+| select_for_update() | Lock database rows |
+| Replication | Copy data to replica databases |
+| Sharding | Distribute data across databases |
+| Pagination | Retrieve data in smaller batches |
+| EXPLAIN ANALYZE | Inspect query execution |
+| Gunicorn | WSGI application server |
+| Uvicorn | ASGI application server |
+| Nginx | Reverse proxy and load balancer |
+| Prometheus | Metrics monitoring |
+| Grafana | Metrics visualization |
+
+---
+
+# 20. FINAL INTERVIEW PREPARATION CHECKLIST
+
+Before attending a Django backend interview, make sure you can explain and implement:
+
+- [ ] Python async and await.
+- [ ] asyncio.gather() and create_task().
+- [ ] Asyncio Semaphore and timeouts.
+- [ ] Synchronous vs asynchronous programming.
+- [ ] Asyncio vs multithreading vs multiprocessing.
+- [ ] Django async views.
+- [ ] Django asynchronous ORM.
+- [ ] ASGI vs WSGI.
+- [ ] Celery and background tasks.
+- [ ] Redis caching.
+- [ ] Django ORM query optimization.
+- [ ] N+1 query problem.
+- [ ] select_related() and prefetch_related().
+- [ ] Database indexing.
+- [ ] Composite indexes.
+- [ ] Database connection pooling.
+- [ ] PgBouncer.
+- [ ] PostgreSQL query optimization.
+- [ ] Database transactions and ACID.
+- [ ] select_for_update() and concurrency control.
+- [ ] Deadlocks.
+- [ ] Database replication.
+- [ ] Database sharding.
+- [ ] Pagination.
+- [ ] Bulk database operations.
+- [ ] Database monitoring.
+- [ ] Load balancing.
+- [ ] Horizontal scaling.
+- [ ] API rate limiting.
+- [ ] Production debugging.
+
+**Final takeaway:**
+
+A good Django backend developer should understand three major areas:
+
+1. **Concurrency:** Handle multiple operations efficiently using asyncio, async Django views, and Celery.
+2. **Database optimization:** Reduce unnecessary queries using ORM optimization, indexes, caching, and efficient SQL.
+3. **Scalability:** Handle increasing traffic using connection pooling, read replicas, load balancing, and monitoring.
+
+Understanding these three areas will prepare you to discuss both everyday Django development and production-level backend engineering.
