@@ -1,1067 +1,1403 @@
-# Microsoft Graph Python SDK — Complete SharePoint Connector Guide
+# Complete Lesson: Connecting Python to SharePoint Using Microsoft Graph REST API and `requests`
 
-## 1. What are we learning?
+## 1. What are we building?
 
-The Microsoft Graph Python SDK (`msgraph-sdk`) lets Python applications communicate with Microsoft 365 services.
+We are building a Python connector that communicates with SharePoint through Microsoft Graph API.
 
-For this lesson, we'll use it to connect to SharePoint and:
+Our eventual architecture is:
 
-1. Authenticate with Microsoft.
+**SharePoint → Microsoft Graph API → Python (`requests`) → Amazon S3 (`boto3`)**
+
+For this lesson, we will concentrate on the first part: connecting to SharePoint and retrieving its files.
+
+By the end, you will understand how to:
+1. Authenticate with Microsoft Graph.
 2. Connect to a SharePoint document library.
-3. List files and folders.
-4. Read file metadata.
-5. Navigate folders.
-6. Find a document by name.
-7. Download a document.
-8. Handle errors and understand pagination.
-
-### How the connection works
-
-Python application → `msgraph-sdk` → Microsoft Graph API → SharePoint.
-
-Microsoft Graph is the API. The Python SDK is the library that makes calling that API easier.
-
-A SharePoint document library is represented by a **Drive**. A file or folder inside it is represented by a **DriveItem**.
+3. Retrieve its files and folders.
+4. Understand the API response.
+5. Extract file information.
+6. Handle pagination.
+7. Handle common API errors.
 
 ---
 
-# 2. Install the required packages
+# 2. What is Microsoft Graph API?
 
-Run:
+Microsoft Graph API is Microsoft's REST API for accessing Microsoft 365 services.
 
-```bash
-pip install msgraph-sdk azure-identity python-dotenv
-```
+For example, it allows Python applications to communicate with:
 
-What these packages do:
+- SharePoint
+- OneDrive
+- Outlook
+- Microsoft Teams
+- Users and groups
+- Microsoft 365 files and documents
 
-| Package | Purpose |
-|---|---|
-| `msgraph-sdk` | Microsoft Graph API client |
-| `azure-identity` | Authentication and access tokens |
-| `python-dotenv` | Loads credentials from a `.env` file |
+Instead of manually opening SharePoint in a browser, we can use Python to send an HTTP request to Microsoft Graph.
 
-The SDK uses asynchronous requests, so we'll use Python's `async` and `await`.
+Microsoft Graph receives the request, checks authentication and permissions, and returns the requested information.
 
----
+### Example
 
-# 3. Register your application in Microsoft Entra ID
-
-Microsoft needs to know which application is trying to access SharePoint.
-
-You need an App Registration.
-
-1. Open https://entra.microsoft.com/
-2. Go to **App registrations**.
-3. Select **New registration**.
-4. Give your application a name, for example `PythonSharePointConnector`.
-5. Register it.
-6. Copy the following values:
-   - Directory (tenant) ID
-   - Application (client) ID
-7. Open **Certificates & secrets**.
-8. Create a client secret and copy its value immediately.
-9. Open **API permissions**.
-10. Add Microsoft Graph application permissions.
-
-For this example, use:
-
-`Files.Read.All`
-
-This allows the application to read files across the organisation's accessible drives and is a broad permission. An administrator must grant consent.
-
-For a production application, consider `Sites.Selected` and grant access only to the required SharePoint sites. The administrator must configure the appropriate site-level permission as well.
-
-Important: never put your client secret directly into Python code or commit it to Git.
-
----
-
-# 4. Create your project
-
-Project structure:
+Imagine your SharePoint document library contains:
 
 ```text
-sharepoint_connector/
+Company Documents
 │
-├── connector.py
-├── .env
-├── .gitignore
-└── downloads/
+├── Financial Report.pdf
+├── Employee Handbook.docx
+├── Sales Data.xlsx
+└── Technical Documentation.pdf
 ```
 
-Create a `.env` file:
+We want Python to retrieve the names and IDs of these files.
 
-```env
-TENANT_ID=your-tenant-id
-CLIENT_ID=your-client-id
-CLIENT_SECRET=your-client-secret
-DRIVE_ID=your-sharepoint-drive-id
+We can do that using:
 
-DOWNLOAD_DIR=downloads
+```python
+requests.get(url, headers=headers)
 ```
 
-Create a `.gitignore` file:
-
-```text
-.env
-.venv/
-__pycache__/
-downloads/
-```
-
-The Drive ID identifies the SharePoint document library you want to access. It is not the same as the Site ID or an individual file ID.
+This sends an HTTP GET request to Microsoft Graph.
 
 ---
 
-# 5. Complete Python connector — one script
+# 3. What is REST API?
 
-Save this as `connector.py`.
+REST stands for Representational State Transfer.
 
-```python
-import os
-import asyncio
-from pathlib import Path
+A REST API allows applications to communicate with each other using HTTP requests.
 
-from dotenv import load_dotenv
+The most common HTTP methods are:
 
-from azure.identity.aio import ClientSecretCredential
-from msgraph import GraphServiceClient
+| Method | Purpose | Example |
+|---|---|---|
+| GET | Retrieve information | Get SharePoint files |
+| POST | Create information or trigger an operation | Create a folder |
+| PUT | Replace a resource | Replace file content |
+| PATCH | Update selected properties | Rename a file |
+| DELETE | Delete a resource | Delete a file |
 
+In our current lesson, we use **GET** because we want to retrieve information from SharePoint.
 
-# ==========================================================
-# 1. LOAD CONFIGURATION
-# ==========================================================
+We are not uploading, changing or deleting anything.
 
-load_dotenv()
+---
 
-TENANT_ID = os.getenv("TENANT_ID")
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-DRIVE_ID = os.getenv("DRIVE_ID")
+# 4. What is the `requests` library?
 
-DOWNLOAD_DIR = Path(
-    os.getenv("DOWNLOAD_DIR", "downloads")
-)
+`requests` is a Python library used to send HTTP requests.
 
-required_values = {
-    "TENANT_ID": TENANT_ID,
-    "CLIENT_ID": CLIENT_ID,
-    "CLIENT_SECRET": CLIENT_SECRET,
-    "DRIVE_ID": DRIVE_ID,
-}
+It allows Python to communicate with external APIs.
 
-missing = [
-    name
-    for name, value in required_values.items()
-    if not value
-]
+### Why do we use it?
 
-if missing:
-    raise ValueError(
-        f"Missing environment variables: {missing}"
-    )
+Microsoft Graph exposes REST API endpoints.
 
+The `requests` library allows us to call those endpoints directly without using the Microsoft Graph SDK.
 
-# ==========================================================
-# 2. AUTHENTICATION
-# ==========================================================
+### Installation
 
-credential = ClientSecretCredential(
-    tenant_id=TENANT_ID,
-    client_id=CLIENT_ID,
-    client_secret=CLIENT_SECRET
-)
-
-SCOPES = [
-    "https://graph.microsoft.com/.default"
-]
-
-
-# ==========================================================
-# 3. CREATE GRAPH CLIENT
-# ==========================================================
-
-client = GraphServiceClient(
-    credentials=credential,
-    scopes=SCOPES
-)
-
-
-# ==========================================================
-# 4. LIST FILES AND FOLDERS
-# ==========================================================
-
-async def list_folder(
-    drive_id: str,
-    folder_id: str = "root"
-):
-    """
-    List files and folders inside a SharePoint folder.
-
-    drive_id:
-        Identifies the document library.
-
-    folder_id:
-        Identifies the folder.
-        Use 'root' for the library's root folder.
-    """
-
-    result = await (
-        client.drives
-        .by_drive_id(drive_id)
-        .items
-        .by_drive_item_id(folder_id)
-        .children
-        .get()
-    )
-
-    items = []
-
-    if result and result.value:
-
-        for item in result.value:
-
-            is_folder = item.folder is not None
-            is_file = item.file is not None
-
-            item_info = {
-                "name": item.name,
-                "id": item.id,
-                "size": item.size,
-                "is_folder": is_folder,
-                "is_file": is_file,
-                "web_url": item.web_url,
-                "created": item.created_date_time,
-                "modified": item.last_modified_date_time,
-                "mime_type": (
-                    item.file.mime_type
-                    if is_file
-                    else None
-                ),
-            }
-
-            items.append(item_info)
-
-            print("\n--------------------------")
-            print("Name:", item_info["name"])
-            print("ID:", item_info["id"])
-            print("Size:", item_info["size"])
-            print("Folder:", item_info["is_folder"])
-            print("File:", item_info["is_file"])
-            print("URL:", item_info["web_url"])
-            print("Modified:", item_info["modified"])
-            print("MIME type:", item_info["mime_type"])
-
-    else:
-        print("No items found.")
-
-    return items
-
-
-# ==========================================================
-# 5. GET DETAILS OF ONE ITEM
-# ==========================================================
-
-async def get_item(
-    drive_id: str,
-    item_id: str
-):
-    """
-    Retrieve metadata for one file or folder.
-    """
-
-    item = await (
-        client.drives
-        .by_drive_id(drive_id)
-        .items
-        .by_drive_item_id(item_id)
-        .get()
-    )
-
-    if item is None:
-        return None
-
-    print("Name:", item.name)
-    print("ID:", item.id)
-    print("Size:", item.size)
-    print("Web URL:", item.web_url)
-    print("Created:", item.created_date_time)
-    print("Modified:", item.last_modified_date_time)
-
-    return item
-
-
-# ==========================================================
-# 6. FIND A FILE BY NAME
-# ==========================================================
-
-async def find_file(
-    drive_id: str,
-    folder_id: str,
-    target_filename: str
-):
-    """
-    Find a file by exact name in one folder.
-
-    This checks only the folder supplied.
-    It does not automatically search subfolders.
-    """
-
-    items = await list_folder(
-        drive_id=drive_id,
-        folder_id=folder_id
-    )
-
-    for item in items:
-
-        if (
-            item["name"] == target_filename
-            and item["is_file"]
-        ):
-            print("File found:", target_filename)
-            return item
-
-    print("File not found:", target_filename)
-
-    return None
-
-
-# ==========================================================
-# 7. DOWNLOAD A FILE
-# ==========================================================
-
-async def download_file(
-    drive_id: str,
-    file_id: str,
-    filename: str
-):
-    """
-    Download a file using its DriveItem ID.
-    """
-
-    DOWNLOAD_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    # Use only the filename, not an untrusted path
-    safe_filename = Path(filename).name
-
-    output_path = DOWNLOAD_DIR / safe_filename
-
-    content = await (
-        client.drives
-        .by_drive_id(drive_id)
-        .items
-        .by_drive_item_id(file_id)
-        .content
-        .get()
-    )
-
-    if content is None:
-        raise RuntimeError(
-            "No file content returned."
-        )
-
-    with open(output_path, "wb") as file:
-        file.write(content)
-
-    print("Downloaded:", output_path)
-
-    return output_path
-
-
-# ==========================================================
-# 8. MAIN PROGRAM
-# ==========================================================
-
-async def main():
-
-    try:
-
-        # List items in the document library root
-        items = await list_folder(
-            drive_id=DRIVE_ID,
-            folder_id="root"
-        )
-
-        # Example: find a document
-        target = "Employee_Handbook.pdf"
-
-        matching_file = next(
-            (
-                item for item in items
-                if item["name"] == target
-                and item["is_file"]
-            ),
-            None
-        )
-
-        # Download it if found
-        if matching_file:
-
-            await download_file(
-                drive_id=DRIVE_ID,
-                file_id=matching_file["id"],
-                filename=matching_file["name"]
-            )
-
-        else:
-            print(
-                f"{target} was not found in the root folder."
-            )
-
-    finally:
-
-        # Close the asynchronous credential
-        await credential.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-Run it:
+Run this in your terminal:
 
 ```bash
-python connector.py
+pip install requests
 ```
 
-The download operation expects the content endpoint to return the file bytes. For very large files, use a streaming/download approach rather than keeping the entire document in memory.
+### Import
+
+```python
+import requests
+```
+
+Explanation:
+
+| Component | Explanation |
+|---|---|
+| `import` | Python instruction to load a module |
+| `requests` | Name of the library |
+| `requests.get()` | Method that sends an HTTP GET request |
+
+You can use the library without creating a separate Graph SDK client.
 
 ---
 
-# 6. Understand every important component
+# 5. Understanding authentication
 
-## A. `load_dotenv()`
+Before accessing SharePoint, Microsoft needs to know:
+
+1. Which application is making the request?
+2. Is the application authenticated?
+3. Does it have permission to access the requested SharePoint content?
+
+This is where an **access token** comes in.
+
+## What is an access token?
+
+An access token is a temporary credential issued by Microsoft Entra ID.
+
+It proves that the application has authenticated and identifies the permissions granted to it.
+
+Think of it as a temporary access pass.
+
+Our Python application sends this token with its API request.
+
+### Example
 
 ```python
-load_dotenv()
+access_token = "YOUR_ACCESS_TOKEN"
 ```
 
-**What:** Loads values from `.env` into environment variables.
+Explanation:
 
-**Why:** We don't want credentials hardcoded in our source code.
-
-**How:**
-
-```python
-TENANT_ID = os.getenv("TENANT_ID")
-```
-
-This reads the value named `TENANT_ID`.
-
-Useful functions:
-
-| Function | Meaning |
+| Component | Meaning |
 |---|---|
-| `load_dotenv()` | Load `.env` |
-| `os.getenv("NAME")` | Read an environment variable |
-| `os.environ["NAME"]` | Read a required variable; raises an error if absent |
-| `Path("downloads")` | Represent a filesystem path |
+| `access_token` | Variable storing the token |
+| `=` | Assignment operator |
+| `"YOUR_ACCESS_TOKEN"` | Placeholder for the actual token |
 
-Use `os.getenv()` when you want to handle missing values yourself.
+This is not a real token. You must obtain one through Microsoft Entra ID authentication.
 
-## B. `ClientSecretCredential`
+### Where does the token come from?
 
-```python
-credential = ClientSecretCredential(
-    tenant_id=TENANT_ID,
-    client_id=CLIENT_ID,
-    client_secret=CLIENT_SECRET
-)
+Typically, you need:
+
+- Microsoft Entra tenant ID
+- Application (client) ID
+- Client secret or certificate, depending on authentication method
+- Appropriate Microsoft Graph permissions
+
+For an unattended enterprise connector, application authentication using client credentials is common.
+
+The token is obtained from the Microsoft identity platform's token endpoint.
+
+For Microsoft Graph, the application commonly requests this scope:
+
+```text
+https://graph.microsoft.com/.default
 ```
 
-This comes from `azure.identity.aio`.
+This means Microsoft should issue a token containing the Graph application permissions that have been configured and consented to for that application.
 
-It authenticates the application using its client ID and client secret.
+### Important permissions
 
-### Parameters
+For example:
 
-| Parameter | Meaning | Why it matters |
-|---|---|---|
-| `tenant_id` | Organisation ID | Identifies the Microsoft Entra tenant |
-| `client_id` | Application ID | Identifies your registered application |
-| `client_secret` | Application password | Proves the application's identity |
+- `Files.Read.All`: read files the application is permitted to access under this permission.
+- `Sites.Read.All`: read SharePoint site content covered by this permission.
+- `Sites.Selected`: access only SharePoint sites for which the application has been explicitly granted access.
 
-### What is a tenant?
+These permissions are not interchangeable. The correct permission depends on the endpoint and the access model.
 
-A tenant is an organisation's Microsoft identity environment.
+Use the least privilege necessary. An administrator may need to grant consent, and `Sites.Selected` also requires a separate site-level permission grant.
 
-For example, a company may have its own Microsoft 365 tenant containing employees, groups, SharePoint sites and applications.
-
-### What is a client ID?
-
-Every registered application has an identifier.
-
-Microsoft uses it to identify which application is making the request.
-
-### What is a client secret?
-
-It is a credential used by your application to authenticate.
-
-It must be protected like a password.
-
-### What happens after authentication?
-
-The credential obtains an access token from Microsoft Entra ID.
-
-The Graph SDK uses that token when making API requests.
-
-You normally don't need to manually request a token for every API call. The credential handles token acquisition and caching.
-
-## C. `SCOPES`
-
-```python
-SCOPES = [
-    "https://graph.microsoft.com/.default"
-]
-```
-
-**What:** Defines the resource and permission scope requested during authentication.
-
-**Why:** Microsoft Graph needs to know which resource the access token is intended for.
-
-For application authentication, `.default` tells Microsoft to use the application permissions configured and consented to for that application.
-
-Important: `.default` does not grant every permission automatically. Your application still needs the correct API permissions and administrator consent.
-
-## D. `GraphServiceClient`
-
-```python
-client = GraphServiceClient(
-    credentials=credential,
-    scopes=SCOPES
-)
-```
-
-This is the main object you'll use throughout your project.
-
-### Parameters
-
-| Parameter | Meaning |
-|---|---|
-| `credentials` | Authentication object |
-| `scopes` | Requested resource scopes |
-
-The client provides access to different Microsoft Graph resources.
-
-Examples:
-
-```python
-client.drives
-client.sites
-client.users
-client.groups
-client.me
-client.device_management
-```
-
-These represent different Graph API resource areas. Access depends on the permissions granted to your application.
-
-For SharePoint documents, we'll mainly use `client.drives` and sometimes `client.sites`.
+**Important:** Do not put a real access token or client secret directly into production source code.
 
 ---
 
-# 7. Understand the SharePoint object hierarchy
+# 6. Understanding the SharePoint identifiers
 
-The most important part of learning this SDK is understanding the object navigation.
-
-Consider:
+Our code uses two important identifiers:
 
 ```python
-client.drives.by_drive_id(DRIVE_ID)
+site_id = "YOUR_SITE_ID"
+drive_id = "YOUR_DRIVE_ID"
 ```
 
-This selects a document library.
+Let's understand them.
 
-Then:
+## What is a site ID?
+
+A site ID identifies a SharePoint site.
+
+For example:
+
+```text
+https://company.sharepoint.com/sites/Finance
+```
+
+This represents a SharePoint site.
+
+The Graph API identifies the site using its site ID.
+
+## What is a drive ID?
+
+A drive ID identifies a document library or OneDrive drive.
+
+For example:
+
+```text
+Finance SharePoint Site
+│
+├── Documents
+├── Shared Documents
+└── Reports
+```
+
+Each document library has its own drive ID.
+
+In Microsoft Graph terminology:
+
+- A `site` represents a SharePoint site.
+- A `drive` represents a document library or OneDrive.
+- A `driveItem` represents an individual file or folder.
+
+### Why do we need a drive ID?
+
+Because our API request needs to know which document library to retrieve files from.
+
+For example:
 
 ```python
-.items
+drive_id = "YOUR_DRIVE_ID"
 ```
 
-Accesses the items in that drive.
+If the company has several document libraries, each may have a different drive ID.
 
-Then:
+### Do we need both site ID and drive ID?
 
-```python
-.by_drive_item_id("root")
+Not for the particular endpoint we are using.
+
+Our current endpoint is:
+
+```text
+/drives/{drive_id}/root/children
 ```
 
-Selects the root folder.
+It only requires the drive ID.
 
-Then:
-
-```python
-.children
-```
-
-Selects the items inside that folder.
-
-Finally:
-
-```python
-.get()
-```
-
-Sends a GET request.
-
-The whole expression:
-
-```python
-result = await (
-    client.drives
-    .by_drive_id(DRIVE_ID)
-    .items
-    .by_drive_item_id("root")
-    .children
-    .get()
-)
-```
-
-is equivalent to the Graph REST API request:
-
-```http
-GET /drives/{drive-id}/items/root/children
-```
-
-### Meaning of each method and property
-
-| Expression | Meaning |
-|---|---|
-| `client` | Main Graph client |
-| `.drives` | Access drives |
-| `.by_drive_id(id)` | Select a drive |
-| `.items` | Access drive items |
-| `.by_drive_item_id(id)` | Select a particular item |
-| `.children` | Access items inside a folder |
-| `.get()` | Perform a GET request |
-| `await` | Wait for the asynchronous response |
-
-The SDK uses method chaining to build the request.
+We can use the site ID in other endpoints to discover sites and their document libraries.
 
 ---
 
-# 8. Understand the returned `DriveItem` attributes
+# 7. Understanding the API URL
 
-When you list a folder, Microsoft Graph returns a collection of `DriveItem` objects.
-
-Each item can represent a file or folder.
-
-The following are useful attributes.
-
-| Attribute | What it means | Typical use |
-|---|---|---|
-| `item.id` | Unique item ID | Download or retrieve the item |
-| `item.name` | File/folder name | Identify documents |
-| `item.size` | Size in bytes | File size checks |
-| `item.web_url` | Browser URL | Open document in SharePoint |
-| `item.created_date_time` | Creation timestamp | Track when created |
-| `item.last_modified_date_time` | Modification timestamp | Detect changes |
-| `item.file` | File-specific properties | Check if it is a file |
-| `item.folder` | Folder-specific properties | Check if it is a folder |
-| `item.parent_reference` | Parent location information | Understand folder hierarchy |
-| `item.created_by` | Creator information | Audit and ownership |
-| `item.last_modified_by` | Last editor information | Track changes |
-| `item.e_tag` | Version-related entity tag | Change detection |
-| `item.c_tag` | Content-related entity tag | Content change tracking |
-| `item.description` | Description, if available | Metadata |
-| `item.shared` | Sharing information, if available | Sharing context |
-| `item.file_system_info` | File system timestamps | File metadata |
-
-Not every property is guaranteed to be populated in every response.
-
-### How to check whether an item is a file or folder
+This is the most important part of our code:
 
 ```python
-if item.folder is not None:
-    print("This is a folder")
-
-if item.file is not None:
-    print("This is a file")
+url = (
+    f"https://graph.microsoft.com/v1.0/"
+    f"drives/{drive_id}/root/children"
+)
 ```
 
-Why?
+Let's break it down.
 
-A DriveItem is a common object representing both files and folders.
+## Part 1: `https://graph.microsoft.com`
 
-Graph uses different properties to describe the type.
+This is the Microsoft Graph API base URL.
 
-### File-specific attributes
+It tells Python where to send the HTTP request.
 
-```python
-item.file.mime_type
-item.file.hashes
-```
+## Part 2: `/v1.0`
 
-`mime_type` tells you the file format.
+This specifies the Microsoft Graph API version.
 
-Examples:
+Microsoft Graph has different API versions.
 
-| File | MIME type |
+| Version | Meaning |
 |---|---|
-| PDF | `application/pdf` |
-| DOCX | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` |
-| XLSX | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
-| TXT | `text/plain` |
+| `v1.0` | Generally available API |
+| `beta` | Preview API; behaviour can change |
 
-`hashes` may contain file hashes, such as SHA-1 or QuickXorHash, when available.
+For production applications, prefer `v1.0` when the endpoint supports the functionality you need.
 
-Use hashes to help detect duplicate content or verify content identity. Don't assume every hash is available.
+## Part 3: `/drives/`
 
-### Folder-specific attributes
+This tells Graph that we want to work with a drive.
 
-```python
-item.folder.child_count
+A drive represents a document library or OneDrive.
+
+## Part 4: `{drive_id}`
+
+This is the unique identifier of the document library.
+
+Python inserts the value of our `drive_id` variable into the URL.
+
+## Part 5: `/root`
+
+This identifies the root folder of the document library.
+
+For example:
+
+```text
+Documents
+│
+├── Report.pdf
+├── Budget.xlsx
+└── Policies
 ```
 
-This tells you how many direct children the folder contains, when provided.
+The root is the top-level folder called `Documents` in this example.
+
+## Part 6: `/children`
+
+This asks Microsoft Graph to return the immediate children of the root folder.
+
+These can be files or folders.
+
+### Complete example URL
+
+Assume our drive ID is `abc123`.
+
+The resulting URL would look like:
+
+```text
+https://graph.microsoft.com/v1.0/drives/abc123/root/children
+```
+
+This means:
+
+"Microsoft Graph, retrieve the files and folders immediately inside the root folder of drive abc123."
+
+---
+
+# 8. What is an f-string?
+
+Our URL contains:
+
+```python
+f"drives/{drive_id}/root/children"
+```
+
+The `f` before the quotation marks makes this an f-string.
+
+An f-string allows us to insert Python variables into text.
 
 Example:
 
 ```python
-if item.folder:
-    print("Children:", item.folder.child_count)
+company = "ABC"
+
+message = f"Welcome to {company}"
+
+print(message)
 ```
 
-This is useful when deciding whether a folder is worth exploring.
+Output:
+
+```text
+Welcome to ABC
+```
+
+In our connector:
+
+```python
+drive_id = "abc123"
+
+url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/children"
+```
+
+Output:
+
+```text
+https://graph.microsoft.com/v1.0/drives/abc123/root/children
+```
+
+Without the `f`, Python would treat `{drive_id}` as ordinary text.
 
 ---
 
-# 9. Common SharePoint connector operations
+# 9. Understanding HTTP headers
 
-## A. Get the document library details
+Our code contains:
 
 ```python
-drive = await (
-    client.drives
-    .by_drive_id(DRIVE_ID)
-    .get()
-)
-
-print(drive.id)
-print(drive.name)
-print(drive.drive_type)
-print(drive.web_url)
+headers = {
+    "Authorization": f"Bearer {access_token}"
+}
 ```
 
-Useful Drive attributes:
+Headers provide additional information about an HTTP request.
 
-| Attribute | Meaning |
+They tell the API things such as:
+
+- Who is making the request?
+- What authentication credential should be checked?
+- What response format is acceptable?
+
+Let's break this down.
+
+## What is a dictionary?
+
+In Python, a dictionary stores information as key-value pairs.
+
+Example:
+
+```python
+person = {
+    "name": "John",
+    "department": "Finance"
+}
+```
+
+Here:
+
+- `name` is a key.
+- `John` is its value.
+- `department` is another key.
+- `Finance` is its value.
+
+Our `headers` variable is also a dictionary.
+
+## What is Authorization?
+
+```python
+"Authorization"
+```
+
+This is an HTTP header name.
+
+It tells Microsoft Graph that the request includes authentication information.
+
+## What is Bearer?
+
+```python
+"Bearer"
+```
+
+Bearer is the authentication scheme used to send the access token.
+
+It is followed by a space and then the token.
+
+For example:
+
+```text
+Authorization: Bearer eyJhbGciOi...
+```
+
+The actual token is much longer.
+
+## Why do we need this header?
+
+Without the appropriate authentication information, Microsoft Graph will generally reject the request.
+
+You might receive:
+
+```text
+401 Unauthorized
+```
+
+This usually means the token is missing, invalid, expired or intended for the wrong resource.
+
+---
+
+# 10. Sending the API request
+
+Now we reach the actual connection:
+
+```python
+response = requests.get(url, headers=headers)
+```
+
+Let's understand every component.
+
+## `requests`
+
+The imported Python library.
+
+## `.get()`
+
+A method provided by the requests library.
+
+It sends an HTTP GET request.
+
+## `url`
+
+The API endpoint we want to contact.
+
+## `headers=headers`
+
+This passes our authentication headers to the API.
+
+The first `headers` is the parameter name expected by `requests.get()`.
+
+The second `headers` is our Python dictionary.
+
+## `response`
+
+This variable stores the HTTP response returned by Microsoft Graph.
+
+It is a Python `Response` object.
+
+It is not yet the extracted JSON dictionary.
+
+### What happens behind the scenes?
+
+1. Python sends an HTTP GET request.
+2. The request goes to Microsoft Graph.
+3. Microsoft checks the access token.
+4. Microsoft checks the application's permissions.
+5. Microsoft identifies the requested drive and root folder.
+6. Microsoft retrieves the immediate children.
+7. Microsoft returns an HTTP response.
+8. Python stores that response in `response`.
+
+---
+
+# 11. Understanding the Response object
+
+After the API call, we can inspect the response.
+
+For example:
+
+```python
+print(response.status_code)
+print(response.headers)
+print(response.text)
+```
+
+### A. `response.status_code`
+
+Returns the HTTP status code.
+
+Common examples:
+
+| Status | Meaning |
 |---|---|
-| `drive.id` | Drive ID |
-| `drive.name` | Library name |
-| `drive.drive_type` | Type of drive |
-| `drive.web_url` | Browser URL |
-| `drive.description` | Description, if available |
-| `drive.owner` | Owner information, if available |
-| `drive.quota` | Storage quota information, if available |
+| 200 | Request successful |
+| 201 | Resource created |
+| 400 | Invalid request |
+| 401 | Authentication failed |
+| 403 | Access forbidden |
+| 404 | Resource not found |
+| 429 | Too many requests |
+| 500 | Server error |
+| 503 | Service temporarily unavailable |
 
-Use this when you want to verify that you connected to the correct library.
+For our GET request, `200` normally means success.
 
-## B. List root folder contents
+Example output:
 
-```python
-result = await (
-    client.drives
-    .by_drive_id(DRIVE_ID)
-    .items
-    .by_drive_item_id("root")
-    .children
-    .get()
-)
-
-for item in result.value:
-    print(item.name)
+```text
+200
 ```
 
-Use `"root"` to access the document library's root folder.
+### B. `response.headers`
 
-## C. List a particular folder
+Returns the HTTP response headers.
 
-```python
-FOLDER_ID = "your-folder-id"
+These are different from the request headers we sent.
 
-result = await (
-    client.drives
-    .by_drive_id(DRIVE_ID)
-    .items
-    .by_drive_item_id(FOLDER_ID)
-    .children
-    .get()
-)
+Response headers can include information about content type, request IDs and throttling.
+
+### C. `response.text`
+
+Returns the response body as text.
+
+For example:
+
+```text
+{"value":[{"name":"Financial Report.pdf","id":"file123"}]}
 ```
 
-Use a folder's ID when you want to navigate into it.
-
-## D. Get one particular file
-
-```python
-FILE_ID = "your-file-id"
-
-item = await (
-    client.drives
-    .by_drive_id(DRIVE_ID)
-    .items
-    .by_drive_item_id(FILE_ID)
-    .get()
-)
-
-print(item.name)
-print(item.size)
-print(item.web_url)
-```
-
-This retrieves metadata about the selected file.
-
-## E. Download a file
-
-```python
-content = await (
-    client.drives
-    .by_drive_id(DRIVE_ID)
-    .items
-    .by_drive_item_id(FILE_ID)
-    .content
-    .get()
-)
-
-with open("document.pdf", "wb") as f:
-    f.write(content)
-```
-
-Important:
-
-- `.content` accesses the file-content endpoint.
-- `.get()` retrieves the file data.
-- `"wb"` opens the local file in binary write mode.
-- `f.write(content)` writes the bytes to disk.
-
-Use binary mode because PDFs, DOCX files and XLSX files are binary formats.
+This is JSON text.
 
 ---
 
-# 10. Understand query parameters
+# 12. Understanding JSON
 
-Graph API supports query parameters that control what data is returned.
+JSON stands for JavaScript Object Notation.
 
-These are important when retrieving large document libraries.
+It is a common format used by APIs to exchange information.
 
-The main parameters include:
-
-| Parameter | Meaning | Why use it |
-|---|---|---|
-| `$select` | Choose properties to return | Reduce unnecessary metadata |
-| `$top` | Request a page size | Control number of returned items |
-| `$orderby` | Sort results | Order by name or modification time |
-| `$filter` | Filter results | Retrieve matching records where supported |
-| `$expand` | Include related resources | Retrieve additional related data |
-| `$skiptoken` | Continue pagination | Retrieve subsequent pages |
-
-Example Graph REST request:
-
-```http
-GET /drives/{drive-id}/items/{folder-id}/children?$select=id,name,size,file,folder,lastModifiedDateTime&$top=50
-```
-
-This asks for up to 50 items and selects only the specified fields.
-
-Why use `$select`?
-
-Imagine a library contains thousands of documents. You may only need the file name, ID, size and modified date.
-
-Requesting unnecessary metadata wastes bandwidth and makes responses larger.
-
-The SDK provides request configuration and query-parameter classes for passing these options. Their generated Python import paths and available options depend on the SDK version. Check the installed version's generated request-builder classes rather than assuming a class name from another language's SDK.
-
-Also, not every Graph endpoint supports every query option. Check the endpoint documentation before relying on `$filter` or `$orderby`.
-
----
-
-# 11. Pagination — a very important concept
-
-Suppose a SharePoint folder contains 1,000 documents.
-
-Graph does not necessarily return all 1,000 in one response.
-
-Instead, it returns a page and may provide an `@odata.nextLink`.
+Microsoft Graph usually returns JSON when we request file metadata.
 
 Example response:
 
 ```json
 {
-  "value": [
-    {
-      "id": "file001",
-      "name": "document1.pdf"
-    }
-  ],
-  "@odata.nextLink": "https://graph.microsoft.com/..."
+    "value": [
+        {
+            "name": "Financial Report.pdf",
+            "id": "file123",
+            "size": 204800
+        },
+        {
+            "name": "Employee Handbook.docx",
+            "id": "file456",
+            "size": 102400
+        }
+    ]
 }
 ```
 
-The next link tells your application where to continue.
+Let's understand the structure.
 
-Why pagination matters:
+## Outer object
 
-If you only process the first response, you may miss hundreds of documents.
+```json
+{
+    "value": []
+}
+```
 
-The SDK's collection response exposes the next-link information as a generated model property, commonly `odata_next_link`.
+The response is a JSON object.
 
-For production, use the SDK's page iterator or follow the next-link URL using the SDK request adapter. Do not construct a new URL by manually guessing the continuation token.
+`value` is a property containing an array of results.
 
-Also, don't assume that setting `$top` guarantees the entire collection is returned.
+## Array
+
+```json
+[
+    {
+        "name": "Financial Report.pdf"
+    },
+    {
+        "name": "Employee Handbook.docx"
+    }
+]
+```
+
+An array is a collection of items.
+
+In Python, JSON arrays become lists.
+
+## Individual objects
+
+```json
+{
+    "name": "Financial Report.pdf",
+    "id": "file123"
+}
+```
+
+Each file is represented by an object.
+
+In Python, JSON objects become dictionaries.
 
 ---
 
-# 12. Recursive folder navigation
+# 13. Converting JSON into Python data
 
-A document library can have nested folders:
-
-```text
-Company Documents/
-│
-├── HR/
-│   ├── Policies/
-│   │   ├── Leave.pdf
-│   │   └── Benefits.pdf
-│   │
-│   └── Employee_Handbook.pdf
-│
-├── Finance/
-│   ├── Annual_Report.xlsx
-│   └── Budget.pdf
-│
-└── Legal/
-    └── Contracts/
-```
-
-Listing the root only returns its direct children.
-
-To inspect nested folders, you must list their children as well.
-
-A recursive function can do this:
+Our code uses:
 
 ```python
-async def walk_folder(drive_id, folder_id="root"):
-
-    items = await list_folder(
-        drive_id,
-        folder_id
-    )
-
-    for item in items:
-
-        if item["is_folder"]:
-
-            await walk_folder(
-                drive_id,
-                item["id"]
-            )
-
-        elif item["is_file"]:
-
-            print("Found file:", item["name"])
+files = response.json()
 ```
 
-This explores folders inside folders.
+Let's understand this carefully.
 
-Production considerations:
+## What is `.json()`?
 
-- Handle pagination in every folder.
-- Limit concurrent requests.
-- Handle access-denied folders.
-- Avoid revisiting the same item.
-- Handle deleted or moved folders.
-- Apply sensible recursion limits if needed.
+`.json()` is a method of the requests `Response` object.
 
----
+It parses the response body as JSON and converts it into Python data structures.
 
-# 13. Common errors
+The conversion is:
 
-| Error | Likely cause | What to check |
-|---|---|---|
-| `401 Unauthorized` | Invalid or missing authentication | Tenant, client ID and secret |
-| `403 Forbidden` | Insufficient permissions | Graph permissions and admin consent |
-| `404 Not Found` | Incorrect drive or item ID | Confirm IDs |
-| `429 Too Many Requests` | Request throttling | Respect `Retry-After` |
-| `500` or `503` | Microsoft service issue | Retry with backoff |
-| Empty result | Folder is empty or wrong location | Confirm drive and folder IDs |
-
-Do not automatically retry every error.
-
-For example, a 403 permission error normally requires fixing permissions, not repeatedly sending the same request.
-
-For 429 and temporary 5xx errors, implement retries with exponential backoff and respect the server's `Retry-After` header.
-
----
-
-# 14. Important security considerations
-
-1. Keep secrets in environment variables or a managed secret store.
-2. Use the minimum permissions needed.
-3. Prefer site-specific permissions where practical.
-4. Respect SharePoint access restrictions.
-5. Don't expose access tokens in logs.
-6. Protect downloaded documents.
-7. Avoid logging confidential document content.
-8. Rotate credentials and consider certificate-based authentication for production applications.
-
----
-
-# 15. Quick reference: important SDK expressions
-
-| Expression | What it does |
+| JSON type | Python type |
 |---|---|
-| `GraphServiceClient(...)` | Creates the Graph client |
-| `client.drives` | Accesses document libraries and drives |
-| `client.sites` | Accesses SharePoint sites |
-| `.by_drive_id(id)` | Selects a drive |
-| `.by_drive_item_id(id)` | Selects a file or folder |
-| `.items` | Accesses drive items |
-| `.children` | Accesses folder contents |
-| `.root` | Accesses drive root |
-| `.content` | Accesses file content |
-| `.get()` | Retrieves data |
-| `.post()` | Creates data where supported |
-| `.patch()` | Updates data where supported |
-| `.delete()` | Deletes data where supported |
-| `result.value` | Collection of returned objects |
-| `item.id` | Item identifier |
-| `item.name` | Item name |
-| `item.size` | Item size |
-| `item.file` | File properties |
-| `item.folder` | Folder properties |
-| `item.web_url` | Browser URL |
+| Object `{}` | Dictionary `dict` |
+| Array `[]` | List `list` |
+| String | `str` |
+| Number | `int` or `float` |
+| `true` | `True` |
+| `false` | `False` |
+| `null` | `None` |
 
-Remember: the SDK is generated from Graph's API description. Available methods and request configuration options depend on the resource and SDK version.
+For example:
+
+JSON:
+
+```json
+{
+    "name": "Financial Report.pdf",
+    "size": 204800
+}
+```
+
+Python:
+
+```python
+{
+    "name": "Financial Report.pdf",
+    "size": 204800
+}
+```
+
+The result is now a Python dictionary.
+
+### Why do we need `.json()`?
+
+Because we want to work with the returned file information using Python.
+
+We can access individual properties, loop through files and pass information to other systems.
 
 ---
 
-# 16. Official documentation
+# 14. Understanding the `value` attribute
 
-- Microsoft Graph Python SDK: https://github.com/microsoftgraph/msgraph-sdk-python
-- Python SDK drive examples: https://github.com/microsoftgraph/msgraph-sdk-python/blob/main/docs/drives_samples.md
-- List folder contents: https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0
-- Download DriveItem content: https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0
-- Microsoft Graph permissions reference: https://learn.microsoft.com/en-us/graph/permissions-reference
-- Azure Identity Python documentation: https://learn.microsoft.com/en-us/python/api/overview/azure/identity-readme
+Our next code is:
+
+```python
+files["value"]
+```
+
+Why `value`?
+
+Because Microsoft Graph places collection results inside the `value` property.
+
+For our request, this contains the files and folders returned from the document library.
+
+Example:
+
+```python
+files = {
+    "value": [
+        {
+            "name": "Financial Report.pdf",
+            "id": "file123"
+        },
+        {
+            "name": "Employee Handbook.docx",
+            "id": "file456"
+        }
+    ]
+}
+```
+
+To retrieve the list:
+
+```python
+file_list = files["value"]
+```
+
+Output:
+
+```python
+[
+    {
+        "name": "Financial Report.pdf",
+        "id": "file123"
+    },
+    {
+        "name": "Employee Handbook.docx",
+        "id": "file456"
+    }
+]
+```
+
+### What does `["value"]` mean?
+
+It accesses the dictionary entry whose key is `value`.
+
+This is dictionary indexing.
+
+It is not a special Microsoft Graph function.
+
+It is normal Python.
 
 ---
 
-# 17. What you should be able to do after this lesson
+# 15. Understanding the for loop
 
-- Explain what Microsoft Graph is.
-- Explain the difference between a Drive, DriveItem, file and folder.
-- Authenticate an application using `ClientSecretCredential`.
-- Create a `GraphServiceClient`.
-- List SharePoint files.
-- Read file metadata.
-- Retrieve a file by its ID.
-- Download a file.
-- Understand pagination and API permissions.
-- Explain the difference between an API request and the Python SDK method that sends it.
+Our code:
 
-**Practical exercise:** Connect to a test SharePoint document library, list its root folder, identify a PDF, retrieve its metadata and download it.
+```python
+for file in files["value"]:
+    print(file["name"])
+```
 
+Let's break it down.
+
+## `for`
+
+A Python keyword used to repeat an operation for each item in a collection.
+
+## `file`
+
+A variable representing the current item in the loop.
+
+You could call it something else:
+
+```python
+for item in files["value"]:
+    print(item["name"])
+```
+
+Both versions work.
+
+## `in`
+
+Tells Python which collection to iterate over.
+
+## `files["value"]`
+
+The list containing the returned file and folder objects.
+
+## `:`
+
+The colon marks the beginning of the loop body.
+
+## Indentation
+
+The indented line belongs to the loop.
+
+## `print()`
+
+Displays information in the terminal.
+
+### How does the loop work?
+
+Suppose Graph returns three items:
+
+```python
+[
+    {"name": "Report.pdf"},
+    {"name": "Budget.xlsx"},
+    {"name": "Policies"}
+]
+```
+
+Python processes them one at a time.
+
+First iteration:
+
+```python
+file = {"name": "Report.pdf"}
+```
+
+Second iteration:
+
+```python
+file = {"name": "Budget.xlsx"}
+```
+
+Third iteration:
+
+```python
+file = {"name": "Policies"}
+```
+
+The print statement runs once for each item.
+
+Expected output:
+
+```text
+Report.pdf
+Budget.xlsx
+Policies
+```
+
+Notice that `Policies` may be a folder, not a file. The `/children` endpoint returns both files and folders.
+
+---
+
+# 16. Understanding file attributes
+
+Each SharePoint file or folder is represented by a Microsoft Graph `driveItem`.
+
+A driveItem can contain many properties.
+
+Here are some important ones.
+
+| Attribute | What it tells us |
+|---|---|
+| `id` | Unique ID of the file or folder within its drive |
+| `name` | File or folder name |
+| `size` | Size in bytes |
+| `webUrl` | Browser URL for the item |
+| `createdDateTime` | Creation date and time |
+| `lastModifiedDateTime` | Last modification date and time |
+| `eTag` | Version-related identifier for the item |
+| `cTag` | Content version-related identifier, when available |
+| `parentReference` | Information about the parent location |
+| `file` | File-specific information, when the item is a file |
+| `folder` | Folder-specific information, when the item is a folder |
+
+Example:
+
+```json
+{
+    "id": "file123",
+    "name": "Financial Report.pdf",
+    "size": 204800,
+    "webUrl": "https://company.sharepoint.com/...",
+    "createdDateTime": "2026-10-10T09:00:00Z",
+    "lastModifiedDateTime": "2026-11-01T12:30:00Z",
+    "file": {
+        "mimeType": "application/pdf"
+    }
+}
+```
+
+### How do we access these attributes in Python?
+
+```python
+for file in files["value"]:
+
+    print(file["id"])
+    print(file["name"])
+    print(file["size"])
+    print(file["webUrl"])
+```
+
+Expected output:
+
+```text
+file123
+Financial Report.pdf
+204800
+https://company.sharepoint.com/...
+```
+
+### Important: `file` versus `folder`
+
+A driveItem may have a `file` property or a `folder` property.
+
+For example:
+
+File:
+
+```json
+{
+    "name": "Report.pdf",
+    "file": {
+        "mimeType": "application/pdf"
+    }
+}
+```
+
+Folder:
+
+```json
+{
+    "name": "Finance",
+    "folder": {
+        "childCount": 12
+    }
+}
+```
+
+To distinguish between them:
+
+```python
+for item in files["value"]:
+
+    if "file" in item:
+        print(item["name"], "is a file")
+
+    elif "folder" in item:
+        print(item["name"], "is a folder")
+```
+
+Expected output:
+
+```text
+Report.pdf is a file
+Finance is a folder
+```
+
+This distinction becomes important when we build a connector that downloads documents but also needs to explore nested folders.
+
+---
+
+# 17. Complete improved version of our connector
+
+Now let's put everything together.
+
+This version includes:
+
+- Authentication header
+- API URL
+- Request timeout
+- HTTP error handling
+- JSON parsing
+- File and folder identification
+- Important metadata
+- Pagination
+
+```python
+import requests
+
+# STEP 1: Authentication token
+access_token = "YOUR_ACCESS_TOKEN"
+
+# STEP 2: SharePoint document library ID
+drive_id = "YOUR_DRIVE_ID"
+
+# STEP 3: Create authentication headers
+headers = {
+    "Authorization": f"Bearer {access_token}"
+}
+
+# STEP 4: Create API URL
+url = (
+    f"https://graph.microsoft.com/v1.0/"
+    f"drives/{drive_id}/root/children"
+)
+
+# STEP 5: Send request and process all pages
+while url:
+
+    response = requests.get(
+        url,
+        headers=headers,
+        timeout=30
+    )
+
+    # STEP 6: Check for HTTP errors
+    response.raise_for_status()
+
+    # STEP 7: Convert JSON response into Python dictionary
+    data = response.json()
+
+    # STEP 8: Process each returned item
+    for item in data.get("value", []):
+
+        print("--------------------------------")
+
+        print("Name:", item.get("name"))
+        print("ID:", item.get("id"))
+        print("Size:", item.get("size"))
+        print("Web URL:", item.get("webUrl"))
+
+        if "file" in item:
+            print("Type: File")
+            print(
+                "MIME Type:",
+                item["file"].get("mimeType")
+            )
+
+        elif "folder" in item:
+            print("Type: Folder")
+            print(
+                "Child Count:",
+                item["folder"].get("childCount")
+            )
+
+        print(
+            "Last Modified:",
+            item.get("lastModifiedDateTime")
+        )
+
+    # STEP 9: Get the next page URL, if one exists
+    url = data.get("@odata.nextLink")
+
+print("SharePoint listing completed.")
+```
+
+---
+
+# 18. Explanation of every additional parameter and method
+
+## A. `timeout=30`
+
+This is a parameter passed to `requests.get()`.
+
+It tells requests how long to wait for the server before raising a timeout exception.
+
+Here, `30` means 30 seconds.
+
+Why use it?
+
+Without a timeout, a request can wait much longer than intended if the server or network stops responding.
+
+Example:
+
+```python
+response = requests.get(
+    url,
+    headers=headers,
+    timeout=30
+)
+```
+
+The timeout can also be specified as a pair:
+
+```python
+timeout=(5, 30)
+```
+
+This means:
+
+- 5 seconds for establishing the connection.
+- 30 seconds for waiting for the response data.
+
+These are not necessarily strict total-operation deadlines.
+
+## B. `raise_for_status()`
+
+```python
+response.raise_for_status()
+```
+
+This method checks whether the HTTP response indicates an unsuccessful request.
+
+If the status is successful, execution continues.
+
+If the status is an HTTP error, requests raises an exception.
+
+For example:
+
+```text
+403 Client Error: Forbidden
+```
+
+Why use it?
+
+Because without checking the status, your program might attempt to process an error response as though it contained the requested file information.
+
+## C. `data.get("value", [])`
+
+```python
+data.get("value", [])
+```
+
+This uses Python's dictionary `.get()` method.
+
+It tries to retrieve the value associated with the key `value`.
+
+The second argument, `[]`, is the default value.
+
+Meaning:
+
+- If `value` exists, return its contents.
+- If `value` does not exist, return an empty list.
+
+Compare:
+
+```python
+data["value"]
+```
+
+with:
+
+```python
+data.get("value", [])
+```
+
+The first can raise a `KeyError` if the key is missing.
+
+The second returns an empty list instead.
+
+## D. `item.get("name")`
+
+This retrieves the `name` property from the current item.
+
+If it is missing, it returns `None` by default.
+
+You can also specify a custom default:
+
+```python
+item.get("name", "Unknown")
+```
+
+## E. `@odata.nextLink`
+
+This is a Microsoft Graph pagination property.
+
+Graph may not return every item in a single response.
+
+Instead, it returns a page of results and provides a URL for the next page.
+
+For example:
+
+```json
+{
+    "value": [
+        {
+            "name": "Report1.pdf"
+        },
+        {
+            "name": "Report2.pdf"
+        }
+    ],
+    "@odata.nextLink": "https://graph.microsoft.com/v1.0/..."
+}
+```
+
+Our code uses:
+
+```python
+url = data.get("@odata.nextLink")
+```
+
+If another page exists, `url` becomes the next-page URL.
+
+If no next page exists, `url` becomes `None`.
+
+Then the `while url:` loop stops.
+
+### What is `while`?
+
+`while` repeats a block of code as long as its condition is true.
+
+In our case:
+
+```python
+while url:
+```
+
+means:
+
+"Keep retrieving pages while a next-page URL is available."
+
+This is essential when a SharePoint library contains many files.
+
+---
+
+# 19. Example output
+
+Assume our SharePoint document library contains:
+
+```text
+Financial Report.pdf
+Employee Handbook.docx
+Finance
+```
+
+An illustrative terminal output could be:
+
+```text
+--------------------------------
+Name: Financial Report.pdf
+ID: file123
+Size: 204800
+Web URL: https://company.sharepoint.com/...
+Type: File
+MIME Type: application/pdf
+Last Modified: 2026-11-01T12:30:00Z
+
+--------------------------------
+Name: Employee Handbook.docx
+ID: file456
+Size: 102400
+Web URL: https://company.sharepoint.com/...
+Type: File
+MIME Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+Last Modified: 2026-11-02T10:00:00Z
+
+--------------------------------
+Name: Finance
+ID: folder789
+Size: 0
+Web URL: https://company.sharepoint.com/...
+Type: Folder
+Child Count: 12
+Last Modified: 2026-11-03T08:30:00Z
+
+SharePoint listing completed.
+```
+
+These are example values, not actual results from your SharePoint environment.
+
+---
+
+# 20. What happens if something goes wrong?
+
+| Error | Possible cause | What to check |
+|---|---|---|
+| 400 Bad Request | Incorrect URL or request parameters | Check the endpoint and identifiers |
+| 401 Unauthorized | Invalid or expired token | Obtain a valid access token |
+| 403 Forbidden | Insufficient permissions | Check Graph permissions and site access |
+| 404 Not Found | Incorrect drive ID or resource | Verify the drive ID |
+| 429 Too Many Requests | Microsoft Graph throttling | Respect `Retry-After` and retry |
+| 500 Internal Server Error | Microsoft service error | Retry appropriately |
+| 503 Service Unavailable | Temporary service issue | Retry with backoff |
+| Timeout | Network or service delay | Check connectivity and timeout settings |
+
+A production connector should implement controlled retries for temporary failures.
+
+For `429` responses, Microsoft Graph can provide a `Retry-After` response header. Follow that guidance instead of repeatedly sending requests immediately.
+
+---
+
+# 21. Important limitations of our current code
+
+Our current code retrieves only the immediate children of the root folder.
+
+For example:
+
+```text
+Documents
+│
+├── Report.pdf
+├── Budget.xlsx
+└── Finance
+    │
+    ├── January.xlsx
+    └── February.xlsx
+```
+
+Our current endpoint:
+
+```text
+/drives/{drive_id}/root/children
+```
+
+returns:
+
+- `Report.pdf`
+- `Budget.xlsx`
+- `Finance`
+
+It does not automatically return:
+
+- `January.xlsx`
+- `February.xlsx`
+
+To retrieve nested documents, we must explore the folder structure recursively or request the children of each folder.
+
+Also, retrieving a file's metadata is not the same as downloading its contents.
+
+For example:
+
+```python
+item["name"]
+```
+
+gives us its name.
+
+It does not give us the PDF or Word document bytes.
+
+To download a file, we will use a separate Graph endpoint:
+
+```text
+GET /drives/{drive_id}/items/{item_id}/content
+```
+
+That is the next step in our connector.
+
+---
+
+# 22. What have we achieved?
+
+We have built the first part of an enterprise source connector.
+
+| Stage | Status |
+|---|---|
+| Import requests | Completed |
+| Supply access token | Required |
+| Identify document library | Required |
+| Construct Graph API URL | Completed |
+| Send authenticated GET request | Completed |
+| Receive HTTP response | Completed |
+| Parse JSON | Completed |
+| Extract file metadata | Completed |
+| Identify files and folders | Completed |
+| Handle pagination | Completed |
+| Download actual document contents | Next step |
+| Upload documents to Amazon S3 | Later step |
+
+## Key concepts to remember
+
+1. `requests` is the Python library that sends HTTP requests.
+2. `access_token` authenticates the application.
+3. `drive_id` identifies the document library.
+4. `headers` carries authentication information.
+5. `url` identifies the API endpoint.
+6. `requests.get()` sends the request.
+7. `response` stores the HTTP response.
+8. `response.raise_for_status()` checks for HTTP errors.
+9. `response.json()` converts JSON into Python objects.
+10. `data["value"]` accesses the collection of returned items.
+11. `for item in ...` processes each item.
+12. `item["name"]` retrieves the item's name.
+13. `@odata.nextLink` allows us to retrieve subsequent pages.
+
+**The most important distinction:** listing a SharePoint document tells us that a file exists and gives us its metadata. Downloading the actual file content is a separate operation.
+
+Our next lesson should be downloading one PDF from SharePoint using `requests`, understanding the `/content` endpoint, the response bytes, and then uploading those bytes to Amazon S3 using `boto3`.
